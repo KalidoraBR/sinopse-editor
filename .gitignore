@@ -1,0 +1,45 @@
+# ===== Dados pessoais e segredos (NUNCA vão para o GitHub) =====
+# chave da API do TMDB
+config.json
+# login do TMDB (cookies)
+tmdb_auth.json
+# trabalho e histórico do usuário
+historico_envios.json
+trabalho_em_andamento.json
+series_salvas.json
+instrucoes_traducao.txt
+trabalhos/
+chrome_coletor_perfil/
+dados_tela/
+*.csv
+erro_*.png
+.env
+.env.*
+!.env.example
+config.local*
+
+# ===== Programa gerado e arquivos temporários =====
+build/
+dist/
+_guardado/
+*.spec
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.zip
+
+# ===== Rascunhos, versões antigas e anotações locais =====
+*.bak
+fluxo.py
+tema.py
+sentai_classico.py
+gerar_exe.bat
+executar_teste.bat
+LEIA-ME.txt
+MELHORIAS.txt
+.claude/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
