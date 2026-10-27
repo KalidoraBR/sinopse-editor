@@ -633,6 +633,7 @@
         }
         case 'log': registrar(ev.texto); break;
         case 'aviso': aviso(ev.texto, 5500); registrar(ev.texto); break;
+        case 'atualizacao': progressoAtualizacao(ev); break;
         case 'prefixo': oferecerPrefixo(ev); break;
         case 'mudancas': mostrarMudancas(ev); break;
         case 'ocupado': definirOcupado(ev.valor); break;
@@ -1026,14 +1027,19 @@
         <label class="nota neutra" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
           <input type="checkbox" id="cfg-revisar" ${c.revisar_envio ? 'checked' : ''} style="margin-top:2px">
           <span><b>Revisar a tradução antes de enviar</b>.<br>
-          Na janela de envio, aponta títulos não traduzidos, sinopses longas, número do prefixo errado e nomes próprios que sumiram.</span></label>`,
+          Na janela de envio, aponta títulos não traduzidos, sinopses longas, número do prefixo errado e nomes próprios que sumiram.</span></label>
+        <label class="nota neutra" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
+          <input type="checkbox" id="cfg-atualizar" ${c.atualizacoes ? 'checked' : ''} style="margin-top:2px">
+          <span style="flex:1"><b>Avisar quando sair versão nova</b><br>
+          Ao abrir, o programa olha no GitHub se há atualização e oferece instalar ali mesmo. Seus dados e configurações são mantidos.</span>
+          <button class="btn-sec" id="cfg-procurar" type="button">${ic('baixar')} Procurar agora</button></label>`,
       botoes: [{ txt: 'Cancelar' }, { txt: 'Salvar', cls: 'btn-pri', acao: async (f) => {
         const chave = $('#cfg-chave', f).value.trim();
         if (chave) {
           const t = await chamar('testar_chave', chave);
           if (!t.ok) { $('#cfg-resultado', f).textContent = 'Chave não aceita: ' + t.erro; $('#cfg-resultado', f).className = 'erro-txt'; return true; }
         }
-        const r = await chamar('salvar_config', chave || null, $('#cfg-idioma', f).value, $('#cfg-limite', f).value, $('#cfg-temporada', f).checked, $('#cfg-prefixo', f).checked, $('#cfg-revisar', f).checked, $('#cfg-idiomas', f).checked, $('#cfg-serie', f).checked);
+        const r = await chamar('salvar_config', chave || null, $('#cfg-idioma', f).value, $('#cfg-limite', f).value, $('#cfg-temporada', f).checked, $('#cfg-prefixo', f).checked, $('#cfg-revisar', f).checked, $('#cfg-idiomas', f).checked, $('#cfg-serie', f).checked, $('#cfg-atualizar', f).checked);
         S.temChave = r.tem_chave; S.limite = Number(r.limite); S.E.idioma = r.idioma;
         aplicarTema($('#cfg-claro', f).checked);
         aplicarAnimacoes($('#cfg-animacoes', f).checked);
@@ -1049,6 +1055,7 @@
       out.textContent = t.ok ? 'Chave válida!' : 'Chave não aceita: ' + t.erro;
       out.className = t.ok ? 'ok-txt' : 'erro-txt';
     };
+    $('#cfg-procurar', fundo).onclick = (ev) => { ev.preventDefault(); procurarAtualizacao(true); };
     $('#cfg-ajuda', fundo).onclick = (ev) => {
       ev.preventDefault();
       modal({ icone: 'chave', estreito: true, titulo: 'Como criar a chave da API',
@@ -1570,6 +1577,40 @@
     });
   }
 
+  async function procurarAtualizacao(manual = false) {
+    if (manual) aviso('Procurando versão nova...');
+    const r = await chamar('procurar_atualizacao', manual);
+    if (!r.nova) {
+      if (manual) aviso(r.erro || 'Você já está com a versão mais recente.');
+      return;
+    }
+    const n = r.nova, mb = n.tamanho ? ` (${Math.round(n.tamanho / 1048576)} MB)` : '';
+    const notas = esc(n.notas).slice(0, 1500).replace(/\n/g, '<br>');
+    modal({ icone: 'baixar', titulo: `Versão ${esc(n.versao)} disponível`,
+      texto: `Você está na versão ${esc($('#versao').textContent.slice(1))}. A atualização é instalada aqui mesmo e o programa abre de novo sozinho; seus dados e configurações continuam.`,
+      corpo: (notas ? `<div class="nota neutra" style="max-height:220px;overflow:auto;font-size:13px">${notas}</div>` : '') +
+        `<div class="trilha" id="atu-trilha" style="margin-top:12px;display:none"><div id="atu-barra"></div></div><span id="atu-txt" style="font-size:13px"></span>`,
+      botoes: r.pode_instalar ? [{ txt: 'Agora não' }, { txt: 'Atualizar agora' + mb, icone: 'baixar', cls: 'btn-pri', acao: async (f, el) => {
+        el.disabled = true; $$('.modal-rodape button', f).forEach((b) => b.disabled = true);
+        $('#atu-trilha', f).style.display = ''; $('#atu-txt', f).textContent = 'Baixando...';
+        await chamar('instalar_atualizacao', n.url);
+        return true;
+      } }] : [{ txt: 'Fechar' }],
+      info: r.pode_instalar ? '' : 'Rodando pelo código-fonte: atualize com git pull.' });
+  }
+
+  function progressoAtualizacao(ev) {
+    const barra = $('#atu-barra'), txt = $('#atu-txt');
+    if (!barra) return;
+    if (ev.erro) {
+      txt.textContent = 'Não deu certo: ' + ev.erro; txt.className = 'erro-txt';
+      $$('.fundo-modal:last-child .modal-rodape button').forEach((b) => b.disabled = false);
+      return;
+    }
+    barra.style.width = ev.pct + '%';
+    txt.textContent = ev.pronto ? 'Instalando... o programa vai fechar e abrir de novo.' : `Baixando... ${ev.pct}%`;
+  }
+
   async function iniciar() {
     ligarTela();
     ligarAtalhos();
@@ -1582,6 +1623,7 @@
     S.limite = Number(c.limite) || 350;
     renderTudo(); renderLogin();
     if (r.login === 'verificando') chamar('verificar_login');
+    if (!r.pendente) setTimeout(() => procurarAtualizacao(false), 1500);
     if (r.pendente) {
       const p = r.pendente;
       modal({ icone: 'lista', titulo: 'Continuar de onde parou?',

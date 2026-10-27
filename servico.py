@@ -10,11 +10,12 @@ import threading
 import pyperclip
 import webview
 
+import atualizador
 import nucleo
 from automatizador import STORAGE
 from instrucoes import ARQUIVO_INSTRUCOES, PROMPT_PADRAO, carregar_instrucoes
 
-VERSAO = "8.2"
+VERSAO = "1.0"
 FINALIZADOS = ("Enviado", "Já preenchido")
 INCOMPLETOS = ("Sem texto", "Sem sinopse")
 ARQUIVO_HISTORICO = nucleo.PASTA / "historico_envios.json"
@@ -312,7 +313,8 @@ class Api:
                 "conferir_prefixo": bool(c.get("conferir_prefixo", True)),
                 "revisar_envio": bool(c.get("revisar_envio", True)),
                 "analisar_idiomas": bool(c.get("analisar_idiomas", True)),
-                "pagina_serie": bool(c.get("pagina_serie", True))}
+                "pagina_serie": bool(c.get("pagina_serie", True)),
+                "atualizacoes": bool(c.get("atualizacoes", True))}
 
     def _com_temporada(self):
         """Opção (desligada por padrão): importar também a sinopse da temporada."""
@@ -328,8 +330,9 @@ class Api:
 
     def salvar_config(self, chave, idioma, limite, sinopse_temporada=False,
                       conferir_prefixo=True, revisar_envio=True, analisar_idiomas=True,
-                      pagina_serie=True):
+                      pagina_serie=True, atualizacoes=True):
         c = nucleo.ler_config()
+        c["atualizacoes"] = bool(atualizacoes)
         c["pagina_serie"] = bool(pagina_serie)
         c["analisar_idiomas"] = bool(analisar_idiomas)
         c["sinopse_temporada"] = bool(sinopse_temporada)
@@ -343,6 +346,37 @@ class Api:
         self.idioma = idioma
         self._publicar()
         return self.ler_config()
+
+    # =========================================================== atualização
+    def procurar_atualizacao(self, manual=False):
+        """Opção (ligada por padrão): ao abrir, olha se há versão nova no GitHub."""
+        if not manual and not nucleo.ler_config().get("atualizacoes", True):
+            return {"nova": None}
+        try:
+            nova = atualizador.procurar(VERSAO)
+        except Exception:
+            return {"nova": None, "erro": "Não foi possível falar com o GitHub agora."}
+        return {"nova": nova, "pode_instalar": atualizador.instalado()}
+
+    def instalar_atualizacao(self, url):
+        def rotina():
+            try:
+                ultimo = [-1]
+
+                def progresso(feito, total):
+                    pct = int(feito * 100 / total)
+                    if pct != ultimo[0]:
+                        ultimo[0] = pct
+                        self._avisar_tela("atualizacao", pct=pct)
+                pasta = atualizador.baixar_e_preparar(url, progresso)
+                self._avisar_tela("atualizacao", pct=100, pronto=True)
+                atualizador.trocar_e_reabrir(pasta)
+                self._salvar_trabalho()
+                self._janela.destroy()
+            except Exception as erro:
+                self._avisar_tela("atualizacao", erro=str(erro))
+        threading.Thread(target=rotina, daemon=True).start()
+        return {"ok": True}
 
     # ================================================================ série
     def buscar_series(self, texto):
