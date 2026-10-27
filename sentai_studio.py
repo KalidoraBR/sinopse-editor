@@ -17,7 +17,7 @@ def main():
     api = Api()
     janela = webview.create_window(
         f"Sinopse Editor {VERSAO}", url=str(BASE / "ui" / "index.html"), js_api=api,
-        width=1440, height=900, min_size=(1180, 720), background_color="#0D253F",
+        width=1440, height=900, min_size=(1180, 720), background_color="#050B18",
         text_select=True)
     api.ligar(janela)
     janela.events.closing += api._salvar_trabalho
