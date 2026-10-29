@@ -54,14 +54,18 @@ Funciona com qualquer série: tokusatsu, anime, drama, animação.
 
 ## Como instalar e usar
 
-1. Baixe o arquivo **`Sinopse-Editor-vX.Y.zip`** em [Versões (Releases)](https://github.com/KalidoraBR/sinopse-editor/releases/latest).
-2. Extraia a pasta em qualquer lugar (por exemplo, em Documentos) e abra **`Sinopse Editor.exe`**.
+1. Baixe o instalador **`Sinopse-Editor-Setup-vX.Y.exe`** em [Versões (Releases)](https://github.com/KalidoraBR/sinopse-editor/releases/latest).
+2. Abra o arquivo e clique em **Avançar** até o fim. Não precisa de senha de administrador; o programa ganha atalho no menu Iniciar (e, se quiser, na Área de Trabalho).
    > O Windows pode mostrar "O Windows protegeu o computador". Clique em **Mais informações → Executar assim mesmo**. Isso aparece porque o programa não tem assinatura digital paga.
+   >
+   > Prefere sem instalar? Baixe o **`Sinopse-Editor-vX.Y.zip`**, extraia a pasta e abra `Sinopse Editor.exe`.
 3. Em **Configurações**, cole a sua chave gratuita da [API do TMDB](https://www.themoviedb.org/settings/api) (opcional, mas recomendada).
 4. Clique na sua conta (canto superior direito) e entre no TMDB. O login fica salvo **só no seu computador**.
 5. Escolha a série, importe a temporada, **Copiar para traduzir** → traduza na IA → **Colar tradução** → **Enviar**.
 
 **Requisitos:** Windows 10 ou 11 e Google Chrome instalado.
+
+**Atualizações:** quando sai uma versão nova, o programa avisa ao abrir e se atualiza sozinho, mantendo seus dados.
 
 <details>
 <summary>Rodar a partir do código-fonte</summary>
@@ -71,7 +75,7 @@ pip install -r requirements.txt
 python sentai_studio.py
 ```
 
-Para gerar a versão portátil (pasta `dist/Sinopse Editor`), rode `gerar_portatil.bat`.
+Para gerar a versão portátil (pasta `dist/Sinopse Editor`), rode `gerar_portatil.bat`. O instalador é feito com o [Inno Setup](https://jrsoftware.org/isinfo.php) a partir dessa pasta: `ISCC /DVersao=X.Y instalador.iss`.
 
 </details>
 
