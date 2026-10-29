@@ -82,7 +82,7 @@ def trocar_e_reabrir(pasta_nova):
     bat.write_text(f"""@echo off
 chcp 65001 >nul
 :espera
-tasklist /fi "PID eq {os.getpid()}" | find "{os.getpid()}" >nul && (timeout /t 1 /nobreak >nul & goto espera)
+%SystemRoot%\\System32\\tasklist.exe /fi "PID eq {os.getpid()}" | %SystemRoot%\\System32\\find.exe "{os.getpid()}" >nul && (ping -n 2 127.0.0.1 >nul & goto espera)
 robocopy "{pasta_nova / '_internal'}" "{app / '_internal'}" /MIR /R:5 /W:1 /NFL /NDL /NJH /NJS >nul
 copy /y "{pasta_nova / NOME_EXE}" "{app / NOME_EXE}" >nul
 start "" "{app / NOME_EXE}"
@@ -90,4 +90,5 @@ rmdir /s /q "{temp}"
 (goto) 2>nul & del "%~f0"
 """, encoding="utf-8")
     subprocess.Popen(["cmd", "/c", str(bat)], close_fds=True,
-                     creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
+                     creationflags=subprocess.CREATE_NO_WINDOW)
+    # Só CREATE_NO_WINDOW: com DETACHED_PROCESS cada comando do .bat abria uma janela preta.
