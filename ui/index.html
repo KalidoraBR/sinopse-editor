@@ -5,7 +5,7 @@
 <title>Sinopse Editor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="estilo.css?v=1.3">
+<link rel="stylesheet" href="estilo.css?v=1.4-1793410680">
 </head>
 <body>
 
@@ -73,14 +73,14 @@
         </div>
       </div>
 
-      <div class="busca">
+      <div class="busca-casa"><div class="busca">
         <label>
           <svg class="i"><use href="#i-busca"/></svg>
           <span class="oculto-leitor">Buscar série</span>
           <input id="busca" type="text" placeholder="Buscar série pelo nome ou código" autocomplete="off">
         </label>
         <div class="resultados" id="resultados" role="listbox" aria-label="Resultados da busca"></div>
-      </div>
+      </div></div>
 
       <div class="topo-direita">
         <button class="btn-contorno" id="btn-navegador" aria-pressed="false" title="Mostrar ou esconder o navegador enquanto trabalha">
@@ -90,33 +90,54 @@
           <span class="avatar"><svg class="i"><use href="#i-usuario"/></svg></span>
           <span class="conta-txt"><b>TMDB</b><small id="login-txt">Verificando...</small></span>
         </button>
+        <button class="conta" id="btn-conta-tvdb" title="Conta do TVDB (para enviar também ao TVDB)">
+          <span class="avatar"><svg class="i"><use href="#i-usuario"/></svg></span>
+          <span class="conta-txt"><b>TVDB</b><small id="login-tvdb-txt">Entrar</small></span>
+        </button>
       </div>
     </header>
 
     <ol class="etapas" id="etapas" aria-label="Etapas do trabalho"></ol>
 
     <div class="acoes" role="toolbar" aria-label="Ações">
-      <div class="grupo">
-        <span class="grupo-rotulo">IMPORTAR</span>
-        <button class="btn-grupo trava" id="imp-tmdb" title="Textos da temporada escolhida (inglês, ou outros idiomas que o TMDB tiver)"><svg class="i"><use href="#i-filme"/></svg>TMDB</button>
-        <button class="btn-grupo trava" id="imp-wiki" title="Textos de uma página de Wiki"><svg class="i"><use href="#i-globo"/></svg>Wiki</button>
-        <button class="btn-grupo trava" id="imp-tvdb" title="Textos em inglês de uma temporada no TVDB (só leitura)"><svg class="i"><use href="#i-banco"/></svg>TVDB</button>
-        <button class="btn-grupo trava" id="imp-lote" title="Várias temporadas ou séries de uma vez"><svg class="i"><use href="#i-camadas"/></svg>Lote</button>
-        <button class="btn-grupo trava" id="imp-planilha" title="Abrir uma planilha CSV"><svg class="i"><use href="#i-pasta"/></svg>Planilha</button>
+      <div class="menu">
+        <button class="btn-acao trava" data-menu><svg class="i"><use href="#i-baixar"/></svg>Importar ▾</button>
+        <div class="menu-lista">
+          <button class="trava" id="imp-tmdb"><svg class="i"><use href="#i-filme"/></svg>TMDB</button>
+          <button class="trava" id="imp-wiki"><svg class="i"><use href="#i-globo"/></svg>Wiki (Fandom)</button>
+          <button class="trava" id="imp-tvdb"><svg class="i"><use href="#i-banco"/></svg>TVDB</button>
+          <button class="trava" id="imp-lote"><svg class="i"><use href="#i-camadas"/></svg>Lote: várias séries e temporadas</button>
+          <button class="trava" id="imp-planilha"><svg class="i"><use href="#i-pasta"/></svg>Planilha (CSV)</button>
+        </div>
       </div>
-      <div class="grupo">
-        <span class="grupo-rotulo">TRADUZIR</span>
-        <button class="btn-roxo" id="btn-copiar"><svg class="i"><use href="#i-copiar"/></svg><span>Copiar para traduzir</span></button>
-        <button class="btn-roxo-suave" id="btn-colar"><svg class="i"><use href="#i-baixar"/></svg><span>Colar tradução</span></button>
-        <button class="btn-grupo" id="btn-instrucoes" aria-label="Editar instruções de tradução" title="Instruções de tradução"><svg class="i"><use href="#i-lapis"/></svg></button>
-        <button class="btn-grupo" id="btn-glossario" aria-label="Glossário da série" title="Glossário da série (opcional)"><svg class="i"><use href="#i-livro"/></svg></button>
-      </div>
+      <span class="elo" aria-hidden="true"></span>
+      <button class="btn-acao" id="btn-copiar"><svg class="i"><use href="#i-copiar"/></svg><span>Copiar para traduzir</span></button>
+      <span class="elo" aria-hidden="true"></span>
+      <button class="btn-acao" id="btn-colar"><svg class="i"><use href="#i-baixar"/></svg><span>Colar tradução</span></button>
       <div class="espaco"></div>
-      <div class="grupo">
-        <span class="grupo-rotulo">SALVAR</span>
-        <button class="btn-grupo" id="btn-exportar" aria-label="Salvar planilha" title="Salvar planilha: guarda a lista de episódios (com a tradução) num arquivo"><svg class="i"><use href="#i-exportar"/></svg></button>
-        <button class="btn-grupo" id="btn-modelo" aria-label="Modelo vazio" title="Modelo vazio: baixa uma planilha em branco para preencher à mão e depois usar em Importar › Planilha"><svg class="i"><use href="#i-tabela"/></svg></button>
+      <div class="menu">
+        <button class="btn-acao quadrado" data-menu aria-label="Mais opções" title="Mais opções">⋯</button>
+        <div class="menu-lista direita">
+          <button id="btn-instrucoes"><svg class="i"><use href="#i-lapis"/></svg>Instruções de tradução</button>
+          <button id="btn-glossario"><svg class="i"><use href="#i-livro"/></svg>Glossário da série</button>
+          <button id="btn-exportar"><svg class="i"><use href="#i-exportar"/></svg>Salvar planilha</button>
+          <button id="btn-modelo"><svg class="i"><use href="#i-tabela"/></svg>Baixar modelo vazio</button>
+          <hr>
+          <button id="btn-localizar"><svg class="i"><use href="#i-busca"/></svg>Localizar e substituir</button>
+          <button id="btn-numeracao"><svg class="i"><use href="#i-hash"/></svg>Ajustar numeração</button>
+          <button id="btn-prefixo"><svg class="i"><use href="#i-lapis"/></svg>Prefixo nos títulos</button>
+          <button id="btn-lado"><svg class="i"><use href="#i-tabela"/></svg>Comparar lado a lado</button>
+          <button id="btn-compacta" aria-pressed="false"><svg class="i"><use href="#i-lista"/></svg>Lista compacta</button>
+          <hr>
+          <button data-ver="marcados"><svg class="i"><use href="#i-check"/></svg>Ver só os marcados</button>
+          <button data-ver="desmarcados"><svg class="i"><use href="#i-lista"/></svg>Ver só os não marcados</button>
+          <button id="btn-mensagens" aria-pressed="false"><svg class="i"><use href="#i-mensagens"/></svg>Mensagens</button>
+          <hr>
+          <button id="btn-limpar"><svg class="i"><use href="#i-lixo"/></svg>Limpar a lista</button>
+        </div>
       </div>
+      <button class="btn-parar" id="btn-parar" hidden><svg class="i"><use href="#i-parar"/></svg>Parar</button>
+      <button class="btn-enviar trava" id="btn-enviar"><svg class="i"><use href="#i-enviar"/></svg><span id="txt-enviar">Enviar</span></button>
     </div>
 
     <div class="centro">
@@ -131,17 +152,9 @@
           <div class="filtros" id="filtros">
             <button data-f="pendentes" aria-pressed="true">Pendentes</button>
             <button data-f="todos" aria-pressed="false">Todos</button>
-            <button data-f="marcados" aria-pressed="false">Marcados</button>
-            <button data-f="desmarcados" aria-pressed="false">Não marcados</button>
             <button data-f="problema" aria-pressed="false">Com problema</button>
             <button data-f="enviados" aria-pressed="false">Enviados</button>
           </div>
-          <button class="btn-mini" id="btn-compacta" title="Lista compacta (liga/desliga)" aria-label="Lista compacta" aria-pressed="false" style="width:30px;padding:0;justify-content:center"><svg class="i"><use href="#i-lista"/></svg></button>
-          <button class="btn-mini" id="btn-lado" title="Comparar lado a lado (original x tradução)" aria-label="Comparar lado a lado" style="width:30px;padding:0;justify-content:center"><svg class="i"><use href="#i-tabela"/></svg></button>
-          <button class="btn-mini" id="btn-localizar" title="Localizar e substituir (Ctrl+F)" aria-label="Localizar e substituir" style="width:30px;padding:0;justify-content:center"><svg class="i"><use href="#i-busca"/></svg></button>
-          <button class="btn-mini" id="btn-numeracao" title="Ajustar numeração" aria-label="Ajustar numeração" style="width:30px;padding:0;justify-content:center"><svg class="i"><use href="#i-hash"/></svg></button>
-          <button class="btn-mini" id="btn-prefixo" title="Prefixo nos títulos (Quest 01, Space.1...)" aria-label="Prefixo nos títulos" style="width:30px;padding:0;justify-content:center"><svg class="i"><use href="#i-lapis"/></svg></button>
-          <button class="btn-mini" id="btn-limpar" title="Limpar a lista" aria-label="Limpar a lista" style="width:30px;padding:0;justify-content:center"><svg class="i"><use href="#i-lixo"/></svg></button>
         </div>
         <div class="colunas">
           <label><input type="checkbox" id="marcar-todos" aria-label="Marcar todos os visíveis"></label>
@@ -158,16 +171,7 @@
         <div class="progresso-txt"><span id="prog-txt">Pronto.</span><span class="seg" id="prog-seg"></span></div>
         <div class="trilha" id="trilha"><div id="trilha-barra"></div></div>
       </div>
-      <button class="btn-contorno" id="btn-mensagens" aria-pressed="false"><svg class="i"><use href="#i-mensagens"/></svg>Mensagens</button>
-      <div class="substituir">
-        <span class="grupo-rotulo">SE JÁ EXISTIR NO TMDB</span>
-        <div>
-          <button class="alternar" id="sub-titulo" aria-pressed="false">Manter títulos</button>
-          <button class="alternar" id="sub-sinopse" aria-pressed="false">Manter sinopses</button>
-        </div>
-      </div>
-      <button class="btn-parar" id="btn-parar" hidden><svg class="i"><use href="#i-parar"/></svg>Parar</button>
-      <button class="btn-enviar trava" id="btn-enviar"><svg class="i"><use href="#i-enviar"/></svg><span id="txt-enviar">Enviar</span></button>
+      <div hidden><button id="sub-titulo"></button><button id="sub-sinopse"></button></div>
     </footer>
   </div>
 </div>
@@ -180,6 +184,6 @@
 <div class="notificacoes" id="notificacoes" aria-live="polite"></div>
 <div id="modais"></div>
 
-<script src="app.js?v=1.3"></script>
+<script src="app.js?v=1.4-1793410680"></script>
 </body>
 </html>

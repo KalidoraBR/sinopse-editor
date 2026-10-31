@@ -4,7 +4,7 @@
 
 # Sinopse Editor
 
-**Traduza títulos e sinopses de séries para o português e envie ao TMDB, temporada por temporada.**
+**Traduza títulos e sinopses de séries para o português e envie ao TMDB e ao TVDB, temporada por temporada.**
 
 [![Versão](https://img.shields.io/github/v/release/KalidoraBR/sinopse-editor?label=vers%C3%A3o&color=01B4E4)](https://github.com/KalidoraBR/sinopse-editor/releases/latest)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0D253F?logo=windows&logoColor=white)
@@ -23,17 +23,17 @@
 <table>
   <tr>
     <td width="50%"><img src="assets/telas/1-trabalho.jpg" alt="Tela de trabalho com a lista de episódios e o painel de tradução"></td>
-    <td width="50%"><img src="assets/telas/3-idiomas.jpg" alt="Escolha dos idiomas disponíveis no TMDB"></td>
+    <td width="50%"><img src="assets/telas/3-envio.jpg" alt="Janela de envio ao TMDB e ao TVDB"></td>
   </tr>
   <tr>
     <td align="center"><sub>Lista de episódios, revisão e painel de tradução</sub></td>
-    <td align="center"><sub>Importação em vários idiomas</sub></td>
+    <td align="center"><sub>Envio ao TMDB, ao TVDB ou aos dois</sub></td>
   </tr>
 </table>
 
 ## O que é
 
-O **Sinopse Editor** ajuda quem contribui com o [TMDB](https://www.themoviedb.org/) a deixar séries em português: ele busca os títulos e sinopses originais, prepara tudo para você traduzir com a IA de sua preferência (ChatGPT, Claude…) e envia o resultado para o TMDB, episódio por episódio, sem copiar e colar página por página.
+O **Sinopse Editor** ajuda quem contribui com o [TMDB](https://www.themoviedb.org/) a deixar séries em português: ele busca os títulos e sinopses originais, prepara tudo para você traduzir com a IA de sua preferência (ChatGPT, Claude…) e envia o resultado para o TMDB e o TVDB, episódio por episódio, sem copiar e colar página por página.
 
 Funciona com qualquer série: tokusatsu, anime, drama, animação.
 
@@ -46,7 +46,7 @@ Funciona com qualquer série: tokusatsu, anime, drama, animação.
     <td width="33%" valign="top"><b>Revisão antes de enviar</b><br><sub>Aponta títulos não traduzidos, sinopses longas e nomes que sumiram. Original e tradução lado a lado.</sub></td>
   </tr>
   <tr>
-    <td valign="top"><b>Envio automático</b><br><sub>Preenche as páginas de edição do TMDB sozinho, com o navegador escondido, e mantém o que já existe se você preferir.</sub></td>
+    <td valign="top"><b>Envio automático</b><br><sub>Preenche as páginas de edição do TMDB e do TVDB sozinho, com o navegador escondido, e mantém o que já existe se você preferir.</sub></td>
     <td valign="top"><b>Histórico e desfazer</b><br><sub>Guarda o texto antigo de cada campo trocado e permite voltar atrás.</sub></td>
     <td valign="top"><b>Página da série</b><br><sub>Traduz também o nome e a sinopse da série e das temporadas, criando a tradução que libera os episódios.</sub></td>
   </tr>
@@ -81,7 +81,7 @@ Para gerar a versão portátil (pasta `dist/Sinopse Editor`), rode `gerar_portat
 
 ## Seus dados ficam com você
 
-A chave da API, o login do TMDB, o histórico e os trabalhos ficam **apenas na pasta do programa, no seu computador**. Nada disso faz parte deste repositório nem é enviado a lugar nenhum além do próprio TMDB.
+A chave da API, o login do TMDB, o histórico e os trabalhos ficam **apenas na pasta do programa, no seu computador**. Nada disso faz parte deste repositório nem é enviado a lugar nenhum além dos próprios TMDB e TVDB.
 
 ## Feito com
 

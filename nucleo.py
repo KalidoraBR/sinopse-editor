@@ -1145,7 +1145,7 @@ def enviar_episodios(itens, idioma, visivel, sub_titulo, sub_sinopse, avisar, de
                 if campo_s:
                     antes["sinopse"], depois["sinopse"] = antes_s, sinopse
                 avisar("historico", registro={
-                    "quando": time.strftime("%Y-%m-%d %H:%M:%S"), "codigo": str(codigo),
+                    "quando": time.strftime("%Y-%m-%d %H:%M:%S"), "site": "TMDB", "codigo": str(codigo),
                     "temporada": str(temporada), "numero": ep, "serie": item.get("serie", ""),
                     "tipo": item.get("tipo", "episodio"),
                     "idioma": idioma, "antes": antes, "depois": depois,
@@ -1163,6 +1163,222 @@ def enviar_episodios(itens, idioma, visivel, sub_titulo, sub_sinopse, avisar, de
     if falhas:
         resumo += f", {len(falhas)} com problema ({', '.join(falhas[:10])}" \
                   f"{' ...' if len(falhas) > 10 else ''})"
+    avisar("progresso", atual=total, total=total, texto=resumo)
+    avisar("log", texto=resumo)
+    return {"ok": len(ok), "pulados": len(pulados), "falhas": len(falhas)}
+
+
+# ============================================================ envio ao TVDB
+# Sem a API (que é paga): o programa abre as páginas de tradução do site com o login
+# da pessoa, igual faz no TMDB. Página de um episódio:
+#   thetvdb.com/series/x/episodes/<número do episódio no TVDB>/translate/<idioma>/0/single
+STORAGE_TVDB = PASTA / "tvdb_auth.json"
+IDIOMA_TVDB = {"pt-BR": "pt", "pt-PT": "por"}
+
+
+def _logado_tvdb(pagina):
+    return "/auth/login" not in pagina.url and pagina.locator("a[href$='/logout']").count() > 0
+
+
+def login_tvdb_valido():
+    if not STORAGE_TVDB.exists():
+        return None
+    with abrir_navegador(False, login=STORAGE_TVDB) as pagina:
+        pagina.goto("https://thetvdb.com/", wait_until="domcontentloaded", timeout=30000)
+        return _logado_tvdb(pagina)
+
+
+def fazer_login_tvdb(avisar):
+    """Abre o TVDB visível; salva o login quando a pessoa termina de entrar."""
+    with sync_playwright() as p:
+        navegador = p.chromium.launch(channel="chrome", headless=False)
+        contexto = navegador.new_context()
+        pagina = contexto.new_page()
+        pagina.goto("https://thetvdb.com/auth/login", wait_until="domcontentloaded")
+        limite = time.time() + 600
+        while time.time() < limite:
+            try:
+                if pagina.is_closed():
+                    break
+                if _logado_tvdb(pagina):
+                    contexto.storage_state(path=str(STORAGE_TVDB))
+                    navegador.close()
+                    return True
+                pagina.wait_for_timeout(1000)
+            except Exception:
+                break
+        try:
+            navegador.close()
+        except Exception:
+            pass
+    return False
+
+
+def link_tvdb_pelo_tmdb(codigo):
+    """Descobre o link da série no TVDB a partir do código do TMDB (o TMDB guarda o
+    número do TVDB). Devolve "" quando não dá."""
+    api = tmdb_configurado()
+    if not api or not str(codigo).isdigit():
+        return ""
+    try:
+        numero = api._get(f"/tv/{codigo}/external_ids").get("tvdb_id")
+        if not numero:
+            return ""
+        pedido = urllib.request.Request(f"https://thetvdb.com/dereferrer/series/{numero}",
+                                        headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(pedido, timeout=20) as resposta:
+            return resposta.url if slug_tvdb(resposta.url) else ""
+    except Exception:
+        return ""
+
+
+def _episodios_da_temporada_tvdb(pagina, slug, temporada, avisar):
+    """{número do episódio: código do episódio no TVDB} da numeração "oficial"."""
+    _abrir_tvdb(pagina, f"https://thetvdb.com/series/{slug}/seasons/official/{temporada}",
+                "table tbody tr", avisar)
+    linhas = pagina.evaluate(r"""() => [...document.querySelectorAll('table tbody tr')]
+        .map((tr) => {
+            const cod = (tr.querySelector('td')?.textContent || '').trim();
+            const a = tr.querySelector("a[href*='/episodes/']");
+            return a ? {cod, url: a.getAttribute('href')} : null;
+        }).filter(Boolean)""")
+    mapa = {}
+    for linha in linhas:
+        n = re.search(r"E(\d+)", linha["cod"], re.I)
+        ident = re.search(r"/episodes/(\d+)", linha["url"])
+        if n and ident:
+            mapa.setdefault(int(n.group(1)), ident.group(1))
+    return mapa
+
+
+def enviar_tvdb(itens, idioma, destinos, visivel, sub_titulo, sub_sinopse, avisar, deve_parar):
+    """Envia títulos e sinopses às páginas de tradução do TVDB.
+
+    `destinos`: {(codigo, temporada): {"link": link da série no TVDB, "temporada": n,
+    "deslocamento": n}}; o episódio N do programa vai para o N + deslocamento do TVDB.
+    Avisa: log, progresso, tvdb(id, valor), historico, pedir_login_tvdb."""
+    lingua = IDIOMA_TVDB.get(idioma)
+    ok, falhas, pulados = [], [], []
+    if not lingua:
+        avisar("log", texto=f"TVDB: o idioma {idioma} não é suportado.")
+        return {"ok": 0, "pulados": 0, "falhas": len(itens)}
+    eps = [i for i in itens if i.get("tipo", "episodio") == "episodio"]
+    total = len(eps)
+    with abrir_navegador(visivel, login=STORAGE_TVDB) as pagina:
+        mapas = {}
+        for n, item in enumerate(eps, 1):
+            if deve_parar():
+                avisar("log", texto="Envio ao TVDB interrompido.")
+                break
+            chave = (str(item["codigo"]), str(item["temporada"]))
+            destino = destinos.get(chave) or {}
+            slug = slug_tvdb(destino.get("link", ""))
+            nome = f"TVDB T{item['temporada']} E{item['numero']}"
+            direto = item.get("codigo_tvdb")  # o Desfazer já sabe o episódio certo
+            avisar("progresso", atual=n - 1, total=total,
+                   texto=f"Enviando ao TVDB {item.get('serie') + ' · ' if item.get('serie') else ''}"
+                         f"E{item['numero']} ({n} de {total})")
+            if not slug and not direto:
+                avisar("tvdb", id=item["id"], valor="Sem link")
+                falhas.append(nome)
+                continue
+            temporada_tvdb = str(destino.get("temporada") or item["temporada"])
+            if direto:
+                mapas[chave] = {int(item["numero"]): direto}
+                destino = {}
+            if chave not in mapas:
+                try:
+                    mapas[chave] = _episodios_da_temporada_tvdb(pagina, slug, temporada_tvdb, avisar)
+                except (ErroAPI, InstavelTVDB) as erro:
+                    avisar("log", texto=f"TVDB: não consegui abrir a temporada {temporada_tvdb} "
+                                        f"de {slug} ({erro}).")
+                    mapas[chave] = {}
+                if not mapas[chave]:
+                    avisar("log", texto=f"TVDB: a temporada {temporada_tvdb} de {slug} não tem "
+                                        "episódios (confira o link e o número da temporada).")
+            numero_tvdb = int(item["numero"]) + int(destino.get("deslocamento") or 0)
+            codigo_ep = mapas[chave].get(numero_tvdb)
+            if not codigo_ep:
+                avisar("log", texto=f"{nome}: não existe o E{numero_tvdb} na temporada "
+                                    f"{temporada_tvdb} do TVDB. Pulado.")
+                avisar("tvdb", id=item["id"], valor="Não encontrado")
+                falhas.append(nome)
+                continue
+            _pausa_tvdb(pagina)
+            try:
+                _abrir_tvdb(pagina, f"https://thetvdb.com/series/x/episodes/{codigo_ep}"
+                                    f"/translate/{lingua}/0/single", "#episode_name", avisar)
+            except (ErroAPI, InstavelTVDB) as erro:
+                avisar("log", texto=f"{nome}: o TVDB não abriu ({erro}).")
+                avisar("tvdb", id=item["id"], valor="Falhou")
+                falhas.append(nome)
+                continue
+            if not _logado_tvdb(pagina):
+                avisar("log", texto="O TVDB pediu login. Nada foi enviado ao TVDB a partir "
+                                    "deste episódio.")
+                avisar("pedir_login_tvdb")
+                falhas.append(nome)
+                break
+            campo_t, campo_s = pagina.locator("#episode_name"), pagina.locator("#episode_overview")
+            if not campo_t.count() or not campo_s.count() or not campo_t.is_editable():
+                avisar("log", texto=f"{nome}: o TVDB não deixa editar este episódio (registro "
+                                    "travado por moderador?). Pulado.")
+                avisar("tvdb", id=item["id"], valor="Travado")
+                falhas.append(nome)
+                continue
+            titulo, sinopse = item.get("titulo") or "", item.get("sinopse") or ""
+            antes_t, antes_s = campo_t.input_value(), campo_s.input_value()
+            if item.get("forcar"):
+                # Desfazer: escreve exatamente o que havia antes, mesmo vazio.
+                troca_t, troca_s = "titulo" in item["campos"], "sinopse" in item["campos"]
+            else:
+                troca_t = bool(titulo) and (sub_titulo or not antes_t.strip())
+                troca_s = bool(sinopse) and (sub_sinopse or not antes_s.strip())
+            if not troca_t and not troca_s:
+                avisar("log", texto=f"{nome}: já estava preenchido no TVDB. Mantido.")
+                avisar("tvdb", id=item["id"], valor="Já preenchido")
+                pulados.append(nome)
+                continue
+            if troca_t:
+                campo_t.fill(titulo)
+            if troca_s:
+                campo_s.fill(sinopse)
+            salvou = False
+            try:
+                with pagina.expect_response(lambda r: "translatestore" in r.url
+                                            and r.request.method == "POST", timeout=30000) as resp:
+                    pagina.locator("form[action*='translatestore'] [type=submit]").first.click()
+                status = resp.value.status
+                pagina.wait_for_load_state("domcontentloaded", timeout=30000)
+                erro_tela = pagina.locator(".alert-danger, .invalid-feedback, .has-error").count()
+                salvou = status < 400 and not erro_tela
+            except Exception:
+                salvou = False
+            if salvou:
+                avisar("log", texto=f"{nome}: salvo no TVDB ✔")
+                avisar("tvdb", id=item["id"], valor="Enviado")
+                antes, depois = {}, {}
+                if troca_t:
+                    antes["titulo"], depois["titulo"] = antes_t, titulo
+                if troca_s:
+                    antes["sinopse"], depois["sinopse"] = antes_s, sinopse
+                avisar("historico", registro={
+                    "quando": time.strftime("%Y-%m-%d %H:%M:%S"), "site": "TVDB",
+                    "codigo": str(item["codigo"]), "temporada": str(item["temporada"]),
+                    "numero": item["numero"], "serie": item.get("serie", ""),
+                    "codigo_tvdb": codigo_ep, "idioma": idioma, "antes": antes,
+                    "depois": depois, "tipo": "desfazer" if item.get("forcar") else "envio"})
+                ok.append(nome)
+            else:
+                avisar("log", texto=f"{nome}: o TVDB não confirmou o salvamento.")
+                pagina.screenshot(path=str(PASTA / f"erro_tvdb_{codigo_ep}.png"))
+                avisar("tvdb", id=item["id"], valor="Falhou")
+                falhas.append(nome)
+    resumo = f"TVDB: {len(ok)} salvos"
+    if pulados:
+        resumo += f", {len(pulados)} já preenchidos (mantidos)"
+    if falhas:
+        resumo += f", {len(falhas)} com problema"
     avisar("progresso", atual=total, total=total, texto=resumo)
     avisar("log", texto=resumo)
     return {"ok": len(ok), "pulados": len(pulados), "falhas": len(falhas)}

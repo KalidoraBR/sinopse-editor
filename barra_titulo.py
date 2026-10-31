@@ -12,8 +12,8 @@ DWMWA_TEXT_COLOR = 36
 
 TEMAS = {
     # cor da barra, cor do texto, cor da borda (formato #RRGGBB)
-    "escuro": ("#071629", "#F2F6FA", "#071629"),
-    "claro": ("#F4E6EE", "#141821", "#F4E6EE"),
+    "escuro": ("#0E1B2E", "#E8EEF5", "#0E1B2E"),
+    "claro": ("#FFFFFF", "#142033", "#FFFFFF"),
 }
 
 

@@ -31,6 +31,9 @@
   };
   const temRefPt = (e) => { const r = refPt(e); return !!(r.titulo || r.sinopse); };
 
+  // O TVDB guarda o próprio resultado em e.tvdb (Enviado, Já preenchido, Falhou...).
+  const problemaTvdb = (e) => !!e.tvdb && !['Enviado', 'Já preenchido'].includes(e.tvdb);
+  const faltaTvdb = (e) => S.usarTvdb && S.loginTvdb && finalizado(e) && (e.tipo || 'episodio') === 'episodio' && temTexto(e) && !['Enviado', 'Já preenchido'].includes(e.tvdb);
   function visiveis() {
     const f = S.filtro;
     return S.E.episodios.filter((e) =>
@@ -38,7 +41,7 @@
       f === 'pendentes' ? !finalizado(e) :
       f === 'marcados' ? e.enviar && !finalizado(e) :
       f === 'desmarcados' ? !e.enviar && !finalizado(e) :
-      f === 'problema' ? e.situacao === 'Falhou' :
+      f === 'problema' ? e.situacao === 'Falhou' || problemaTvdb(e) :
       finalizado(e));
   }
 
@@ -114,9 +117,17 @@
     $$('.sugestao', lista).forEach((x) => x.onclick = () => { campo.value = x.dataset.url; campo.dispatchEvent(new Event('input')); lista.innerHTML = ''; });
   });
 
-  function modal({ icone = 'camadas', alerta = false, titulo, texto = '', corpo = '', botoes = [], estreito = false, info = '' }) {
+  // Minhas séries, Trabalhos salvos, Histórico, Guia e Configurações abrem como página.
+  function marcarMenu(id) {
+    $$('.trilho-btn').forEach((b) => b.removeAttribute('aria-current'));
+    (id ? $('#' + id) : $('.trilho-btn')).setAttribute('aria-current', 'page');
+  }
+  function fecharPagina() { $('.fundo-modal.pagina')?.fecharPagina?.(); }
+
+  function modal({ icone = 'camadas', alerta = false, titulo, texto = '', corpo = '', botoes = [], estreito = false, info = '', pagina = null }) {
     const fundo = document.createElement('div');
-    fundo.className = 'fundo-modal';
+    fundo.className = 'fundo-modal' + (pagina ? ' pagina' : '');
+    if (pagina) fecharPagina();
     fundo.innerHTML = `
       <div class="modal ${estreito ? 'estreito' : ''}" role="dialog" aria-modal="true" aria-labelledby="m-titulo">
         <div class="modal-cab">
@@ -129,14 +140,16 @@
       </div>`;
     const fechar = () => {
       document.removeEventListener('keydown', tecla);
+      if (pagina) { fundo.remove(); marcarMenu(null); return; }
       if (fundo.classList.contains('saindo')) return;
       fundo.classList.add('saindo');
       setTimeout(() => fundo.remove(), document.body.classList.contains('sem-animacao') ? 0 : 160);
     };
-    const tecla = (ev) => { if (ev.key === 'Escape') fechar(); };
+    const tecla = (ev) => { if (ev.key === 'Escape' && !pagina) fechar(); };
     document.addEventListener('keydown', tecla);
     $('.fechar', fundo).onclick = fechar;
-    fundo.addEventListener('mousedown', (ev) => { if (ev.target === fundo) fechar(); });
+    if (!pagina) fundo.addEventListener('mousedown', (ev) => { if (ev.target === fundo) fechar(); });
+    if (pagina) { fundo.fecharPagina = fechar; marcarMenu(pagina); }
     const rodape = $('.modal-rodape', fundo);
     botoes.forEach((b) => {
       const el = document.createElement('button');
@@ -145,7 +158,7 @@
       el.onclick = async () => { const manter = b.acao ? await b.acao(fundo, el) : false; if (!manter) fechar(); };
       rodape.appendChild(el);
     });
-    $('#modais').appendChild(fundo);
+    (pagina ? $('.principal') : $('#modais')).appendChild(fundo);
     setTimeout(() => ($('input, textarea, select', fundo) || $('.modal-rodape button:last-child', fundo))?.focus(), 30);
     return { fundo, fechar };
   }
@@ -191,15 +204,16 @@
     poster.innerHTML = img ? `<img src="${esc(img)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:7px">` : ic('imagem');
 
     const chips = [];
-    if (serie.codigo) chips.push(`<span class="chip">TMDB ${esc(serie.codigo)}</span>`);
-    const temps = (serie.temporadas || []).map((t) => String(t.numero));
+        const temps = (serie.temporadas || []).map((t) => String(t.numero));
     if (temps.length) {
       chips.push(`<label class="oculto-leitor" for="sel-temporada">Temporada</label>
         <select class="chip" id="sel-temporada">${temps.map((n) => `<option value="${n}" ${String(serie.temporada) === n ? 'selected' : ''}>${n === '0' ? 'Especiais' : 'Temporada ' + n}</option>`).join('')}</select>`);
     }
     chips.push(`<label class="oculto-leitor" for="sel-idioma">Idioma de destino</label>
-      <select class="chip" id="sel-idioma">${['pt-BR', 'pt-PT'].map((i) => `<option value="${i}" ${S.E.idioma === i ? 'selected' : ''}>Destino: ${i}</option>`).join('')}</select>`);
+      <select class="chip" id="sel-idioma">${['pt-BR', 'pt-PT'].map((i) => `<option value="${i}" ${S.E.idioma === i ? 'selected' : ''}>${i === 'pt-BR' ? 'Português (Brasil)' : 'Português (Portugal)'}</option>`).join('')}</select>`);
+    if (S.E.episodios.length) chips.push('<button class="chip-link" id="btn-trocar">Trocar série</button><span class="salvo-auto" title="O trabalho é guardado sozinho a cada mudança">✓ Salvo automaticamente</span>');
     $('#chips').innerHTML = chips.join('');
+    $('#btn-trocar')?.addEventListener('click', () => { const v = document.body.classList.toggle('trocando'); if (v) $('#busca').focus(); });
     $('#sel-temporada')?.addEventListener('change', (ev) => { S.E.serie.temporada = ev.target.value; chamar('definir', 'temporada', ev.target.value); });
     $('#sel-idioma').addEventListener('change', (ev) => { S.E.idioma = ev.target.value; chamar('definir', 'idioma', ev.target.value); });
 
@@ -220,9 +234,22 @@
     txt.style.color = c;
   }
 
+  function renderLoginTvdb() {
+    $('#btn-conta-tvdb').hidden = !S.usarTvdb;
+    const txt = $('#login-tvdb-txt');
+    txt.textContent = S.loginTvdb ? 'Conectado' : 'Entrar';
+    txt.style.color = S.loginTvdb ? '#5FD08A' : '';
+  }
+
   // =================================================================== lista
   function renderLista() {
     const eps = S.E.episodios;
+    document.body.classList.toggle('sem-lista', !eps.length);
+    $('.busca-casa').appendChild($('.busca'));
+    const contagem = { pendentes: eps.filter((e) => !finalizado(e)).length, todos: eps.length,
+      problema: eps.filter((e) => e.situacao === 'Falhou' || problemaTvdb(e)).length, enviados: eps.filter(finalizado).length };
+    const nomesF = { pendentes: 'Pendentes', todos: 'Todos', problema: 'Com problema', enviados: 'Enviados' };
+    $$('#filtros button').forEach((b) => { b.textContent = `${nomesF[b.dataset.f]} ${contagem[b.dataset.f]}`; });
     const vis = visiveis();
     const feitos = eps.filter(finalizado).length;
     const g = grupos(eps);
@@ -246,17 +273,20 @@
 
     const rol = $('#rolagem');
     if (!eps.length) {
-      rol.innerHTML = `<div class="vazio">
-        <div class="icone-grande">${ic('lista', 'i-20')}</div>
-        <h3>Sua lista de episódios está vazia</h3>
-        <p>Busque uma série no topo e importe uma temporada, ou use o Lote para várias temporadas e séries de uma vez.</p>
-        <div class="linha-flex" style="margin-top:8px">
-          <button class="btn-sec" data-acao="tmdb">${ic('filme')} Importar do TMDB</button>
-          <button class="btn-sec" data-acao="lote">${ic('camadas')} Abrir o lote</button>
+      rol.innerHTML = `<div class="inicio">
+        <h1>Qual série você vai traduzir?</h1>
+        <div id="hero-busca"></div>
+        <span class="inicio-ou">Ou comece por outra fonte:</span>
+        <div class="fontes">
+          <button class="fonte" data-clicar="imp-wiki">${ic('globo')}<b>Wiki (Fandom)</b><span>Quando o TMDB não tem sinopse</span></button>
+          <button class="fonte verde" data-clicar="imp-tvdb">${ic('banco')}<b>TVDB</b><span>Pela numeração do TVDB</span></button>
+          <button class="fonte" data-clicar="imp-lote">${ic('camadas')}<b>Lote</b><span>Várias séries e temporadas de uma vez</span></button>
+          <div class="fonte verde" role="button" tabindex="0" data-clicar="imp-planilha">${ic('tabela')}<b>Planilha</b><span>Abrir um arquivo CSV</span><a href="#" data-modelo>Baixar modelo vazio</a></div>
         </div>
         <div class="inicio-recentes" id="inicio-recentes"></div></div>`;
-      $('[data-acao="tmdb"]', rol).onclick = importarTmdb;
-      $('[data-acao="lote"]', rol).onclick = abrirLote;
+      $('#hero-busca', rol).appendChild($('.busca'));
+      $$('[data-clicar]', rol).forEach((c) => c.onclick = () => $('#' + c.dataset.clicar).click());
+      $('[data-modelo]', rol).onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); $('#btn-modelo').click(); };
       preencherInicio();
     } else if (!vis.length) {
       const tudo = S.filtro === 'pendentes' && feitos > 0;
@@ -329,13 +359,16 @@
     if (e.sinopse_do_plot && !['Traduzido', 'Editado', 'Enviado', 'Já preenchido'].includes(e.situacao)) {
       etiqueta += ' <span class="idi-tag plot" title="A Wiki não tinha sinopse: veio o enredo completo (Plot). A IA vai resumir ao traduzir.">PLOT</span>';
     }
+    const site = (nome, valor) => { const bom = valor === 'Enviado' || valor === 'Já preenchido';
+      return `<span class="selo ${bom ? 'selo-ok' : 'selo-falha'}" title="${nome}: ${esc(valor)}">${nome} ${bom ? '✓' : 'falhou'}</span>`; };
+    const selos = (finalizado(e) ? site('TMDB', e.situacao) : `<span class="selo ${classeSelo(e.situacao)}">${esc(e.situacao)}</span>`) + (e.tvdb ? site('TVDB', e.tvdb) : '');
     const cls = tam > S.limite ? 'excesso' : tam > S.limite * 0.8 ? 'alerta' : '';
     return `<div class="ep ${S.sel === e.id ? 'sel' : ''} ${finalizado(e) ? 'feito' : ''}" data-id="${e.id}">
       <label onclick="event.stopPropagation()"><input type="checkbox" ${e.enviar ? 'checked' : ''} ${finalizado(e) ? 'disabled' : ''} aria-label="Enviar o episódio ${e.numero}"></label>
       <span class="cod">${e.tipo === 'serie' ? 'SÉRIE' : e.tipo === 'temporada' ? 'TEMP' : 'E' + String(e.numero).padStart(2, '0')}</span>
       <div class="txt"><b>${e.tipo === 'serie' ? 'Série: ' + (esc(e.titulo) || 'nome') : e.tipo === 'temporada' ? 'Sinopse da temporada' : (esc(e.titulo) || '<i style="color:#6E778C">sem título</i>')}${etiqueta}</b><span>${esc(e.sinopse) || '—'}</span></div>
       <span class="tam ${cls}"><span class="ind ${e.tipo === 'temporada' ? 'oculto' : (e.titulo || '').trim() ? 'tem' : 'falta'}" title="${(e.titulo || '').trim() ? 'Tem título' : 'Sem título'}">T</span><span class="ind ${tam ? 'tem' : 'falta'}" title="${tam ? 'Tem sinopse' : 'Sem sinopse'}">S</span>${tam}</span>
-      <span class="selo ${classeSelo(e.situacao)}">${esc(e.situacao)}</span>
+      <span class="selos">${selos}</span>
       <button class="tirar-ep" data-tirar="${e.id}" title="Tirar este episódio da lista" aria-label="Tirar o episódio ${e.numero} da lista">${ic('lixo')}</button></div>`;
   }
 
@@ -531,7 +564,8 @@
     const n = S.E.episodios.filter((e) => e.enviar && !finalizado(e) && temTexto(e)).length;
     const g = new Set(S.E.episodios.filter((e) => e.enviar && !finalizado(e) && temTexto(e)).map(grupoDe)).size;
     $('#txt-enviar').textContent = n ? `Enviar ${n} episódio${n > 1 ? 's' : ''}` : 'Enviar';
-    $('#btn-enviar').disabled = S.E.ocupado || !n;
+    // Já enviados ao TMDB que ainda não foram ao TVDB também liberam o botão.
+    $('#btn-enviar').disabled = S.E.ocupado || !(n || S.E.episodios.some(faltaTvdb));
     if (!S.E.ocupado) {
       const feitos = S.E.episodios.filter(finalizado).length, total = S.E.episodios.length;
       $('#prog-seg').textContent = total ? `${feitos} de ${total} já enviados` : '';
@@ -549,6 +583,7 @@
 
   function definirOcupado(valor) {
     S.E.ocupado = valor;
+    document.body.classList.toggle('tarefa', !!valor);
     $$('.trava').forEach((b) => { b.disabled = valor; });
     $('#btn-parar').hidden = !valor;
     $('#btn-enviar').hidden = valor;
@@ -638,12 +673,17 @@
         case 'mudancas': mostrarMudancas(ev); break;
         case 'ocupado': definirOcupado(ev.valor); break;
         case 'login': S.login = ev.estado; renderLogin(); break;
+        case 'login_tvdb': S.loginTvdb = ev.estado === 'conectado'; renderLoginTvdb(); renderRodape(); break;
+        case 'pedir_login_tvdb': S.loginTvdb = false; renderLoginTvdb(); modal({ icone: 'chave', alerta: true, estreito: true, titulo: 'É preciso entrar no TVDB',
+          texto: 'O TVDB não reconheceu seu login (ele pode ter expirado). Nada foi enviado ao TVDB a partir desse episódio.',
+          botoes: [{ txt: 'Agora não' }, { txt: 'Entrar no TVDB', cls: 'btn-pri', acao: () => { chamar('entrar_tvdb'); } }] }); break;
         case 'pedir_login': pedirLogin('O TMDB não reconheceu seu login (ele pode ter expirado). Nada foi enviado a partir desse episódio.'); break;
         case 'historico_mudou':
           if (historicoAberto && document.body.contains(historicoAberto.fundo)) { historicoAberto.fechar(); abrirHistorico(); }
           break;
         case 'envio_fim': {
-          const partes = [`${ev.ok} salvo(s) no TMDB`];
+          const partes = ev.tmdb === false ? [] : [`${ev.ok} salvo(s) no TMDB`];
+          if (ev.tvdb) partes.push(`${ev.tvdb.ok} salvo(s) no TVDB` + (ev.tvdb.falhas ? ` (${ev.tvdb.falhas} com problema)` : ''));
           if (ev.pulados) partes.push(`${ev.pulados} já preenchido(s)`);
           if (ev.falhas) partes.push(`${ev.falhas} com problema (use “Tentar de novo”)`);
           registrar('Envio concluído: ' + partes.join(', ') + '.');
@@ -984,76 +1024,58 @@
 
   async function abrirConfig() {
     const c = await chamar('ler_config');
-    const { fundo } = modal({ icone: 'config', titulo: 'Configurações',
-      corpo: `
-        <div class="campo"><label for="cfg-chave" style="font-size:14px;color:#E9ECF2">Chave da API do TMDB</label>
-          <p style="font-size:13px;color:#8C94A8">Com ela, pôsteres, nomes, temporadas e episódios vêm direto do banco de dados do TMDB, e dá para buscar séries pelo nome. É gratuita.</p>
-          <div class="linha-flex"><input class="entrada" id="cfg-chave" type="password" style="flex:1;font-family:var(--mono)" placeholder="${c.tem_chave ? 'Chave salva (termina em ' + esc(c.chave_final) + ') — cole outra para trocar' : 'Cole aqui a chave da API ou o token de leitura'}">
-          <button class="btn-sec" id="cfg-testar">${ic('check')} Testar</button></div>
-          <span id="cfg-resultado" class="${c.tem_chave ? 'ok-txt' : ''}">${c.tem_chave ? 'Chave salva.' : ''}</span>
-          <a href="#" id="cfg-ajuda" style="font-size:13px">Como criar a chave gratuita →</a>
-        </div>
-        <div class="grade-2">
-          <div class="campo"><label for="cfg-idioma">Idioma de destino padrão</label>
-            <select class="entrada" id="cfg-idioma">${['pt-BR', 'pt-PT'].map((i) => `<option value="${i}" ${c.idioma === i ? 'selected' : ''}>${i === 'pt-BR' ? 'Português (Brasil) — pt-BR' : 'Português (Portugal) — pt-PT'}</option>`).join('')}</select></div>
-          <div class="campo"><label for="cfg-limite">Tamanho máximo da sinopse</label>
-            <select class="entrada" id="cfg-limite">${[250, 350, 500].map((n) => `<option value="${n}" ${Number(c.limite) === n ? 'selected' : ''}>${n} caracteres${n === 350 ? ' (cerca de 3 linhas)' : ''}</option>`).join('')}</select></div>
-        </div>
-        <label class="nota neutra" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
-          <input type="checkbox" id="cfg-temporada" ${c.sinopse_temporada ? 'checked' : ''} style="margin-top:2px">
-          <span><b>Importar também a sinopse da temporada</b> (opcional, precisa da chave da API).<br>
-          Aparece como o primeiro item da lista (“TEMP”) e segue o mesmo caminho: traduzir, conferir e enviar. Desmarque o item se não quiser enviá-lo.</span></label>
-        <label class="nota neutra" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
-          <input type="checkbox" id="cfg-etapas" ${(() => { try { return localStorage.getItem('mostrarEtapas') !== '0'; } catch (_) { return true; } })() ? 'checked' : ''} style="margin-top:2px">
-          <span><b>Mostrar as etapas no topo</b><br>Importar → Traduzir → Revisar → Enviar, marcando o que já foi feito.</span></label>
-        <label class="nota neutra" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
-          <input type="checkbox" id="cfg-animacoes" ${document.body.classList.contains('sem-animacao') ? '' : 'checked'} style="margin-top:2px">
-          <span><b>Animações</b><br>Abertura do programa, janelas que surgem e somem, e avisos animados de tarefa concluída.</span></label>
-        <label class="nota neutra" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
-          <input type="checkbox" id="cfg-claro" ${document.body.classList.contains('claro') ? 'checked' : ''} style="margin-top:2px">
-          <span><b>Tema claro</b><br>Fundo branco em vez do escuro. Muda na hora, e o programa lembra da escolha.</span></label>
-        <label class="nota neutra" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
-          <input type="checkbox" id="cfg-serie" ${c.pagina_serie ? 'checked' : ''} style="margin-top:2px">
-          <span><b>Mostrar a página da série no topo da temporada</b> (precisa da chave da API).<br>
-          O item “SÉRIE” (nome e sinopse da série) e a sinopse da temporada aparecem antes do E01. Vêm marcados sozinhos só quando a série ainda não tem português no TMDB (sem isso o TMDB não deixa editar os episódios); nos outros casos, marque se quiser traduzir.</span></label>
-        <label class="nota neutra" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
-          <input type="checkbox" id="cfg-idiomas" ${c.analisar_idiomas ? 'checked' : ''} style="margin-top:2px">
-          <span><b>Ver os idiomas disponíveis ao importar do TMDB</b> (precisa da chave da API).<br>
-          Mostra em quais idiomas a temporada tem texto e deixa completar o que falta em inglês com outros (ex.: espanhol). Desligado, importa só em inglês.</span></label>
-        <label class="nota neutra" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
-          <input type="checkbox" id="cfg-prefixo" ${c.conferir_prefixo ? 'checked' : ''} style="margin-top:2px">
-          <span><b>Conferir prefixo dos títulos na Wiki</b> (ex.: “Quest 01:”).<br>
-          Ao importar do TMDB, se a série já tem um link da Wiki salvo e a Wiki usa prefixo que o TMDB não traz, o programa oferece colocar.</span></label>
-        <label class="nota neutra" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
-          <input type="checkbox" id="cfg-revisar" ${c.revisar_envio ? 'checked' : ''} style="margin-top:2px">
-          <span><b>Revisar a tradução antes de enviar</b>.<br>
-          Na janela de envio, aponta títulos não traduzidos, sinopses longas, número do prefixo errado e nomes próprios que sumiram.</span></label>
-        <label class="nota neutra" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
-          <input type="checkbox" id="cfg-atualizar" ${c.atualizacoes ? 'checked' : ''} style="margin-top:2px">
-          <span style="flex:1"><b>Avisar quando sair versão nova</b><br>
-          Ao abrir, o programa olha no GitHub se há atualização e oferece instalar ali mesmo. Seus dados e configurações são mantidos.</span>
-          <button class="btn-sec" id="cfg-procurar" type="button">${ic('baixar')} Procurar agora</button></label>`,
-      botoes: [{ txt: 'Cancelar' }, { txt: 'Salvar', cls: 'btn-pri', acao: async (f) => {
-        const chave = $('#cfg-chave', f).value.trim();
-        if (chave) {
-          const t = await chamar('testar_chave', chave);
-          if (!t.ok) { $('#cfg-resultado', f).textContent = 'Chave não aceita: ' + t.erro; $('#cfg-resultado', f).className = 'erro-txt'; return true; }
-        }
-        const r = await chamar('salvar_config', chave || null, $('#cfg-idioma', f).value, $('#cfg-limite', f).value, $('#cfg-temporada', f).checked, $('#cfg-prefixo', f).checked, $('#cfg-revisar', f).checked, $('#cfg-idiomas', f).checked, $('#cfg-serie', f).checked, $('#cfg-atualizar', f).checked);
-        S.temChave = r.tem_chave; S.limite = Number(r.limite); S.E.idioma = r.idioma;
-        aplicarTema($('#cfg-claro', f).checked);
-        aplicarAnimacoes($('#cfg-animacoes', f).checked);
-        try { localStorage.setItem('mostrarEtapas', $('#cfg-etapas', f).checked ? '1' : '0'); } catch (_) {}
-        aviso('Configurações salvas.');
-        renderTudo();
-      } }] });
+    const opcao = (id, liga, nome, frase) => `<label class="opcao"><span><b>${nome}</b><small>${frase}</small></span><input type="checkbox" role="switch" class="chave" id="cfg-${id}" ${liga ? 'checked' : ''}></label>`;
+    const { fundo } = modal({ pagina: 'btn-config', icone: 'config', titulo: 'Configurações',
+      texto: 'Cada mudança vale na hora e fica guardada só neste computador.',
+      corpo: `<div class="cfg-colunas"><div class="cfg-coluna">
+        <section class="cfg-grupo"><h2>Geral</h2>
+          <label for="cfg-chave" class="cfg-rotulo">Chave da API do TMDB <a href="#" id="cfg-ajuda">Como criar</a></label>
+          <div class="linha-flex"><input class="entrada" id="cfg-chave" type="password" style="flex:1" placeholder="${c.tem_chave ? 'Chave salva (termina em ' + esc(c.chave_final) + ')' : 'Cole aqui a chave da API'}">
+          <button class="btn-azul" id="cfg-testar">Testar</button></div>
+          <span id="cfg-resultado" class="${c.tem_chave ? 'ok-txt' : ''}">${c.tem_chave ? '✓ Chave salva' : ''}</span>
+          <div class="grade-2">
+            <div class="campo"><label for="cfg-idioma" class="cfg-rotulo">Idioma de destino</label>
+              <select class="entrada" id="cfg-idioma">${['pt-BR', 'pt-PT'].map((i) => `<option value="${i}" ${c.idioma === i ? 'selected' : ''}>${i === 'pt-BR' ? 'Português (Brasil)' : 'Português (Portugal)'}</option>`).join('')}</select></div>
+            <div class="campo"><label for="cfg-limite" class="cfg-rotulo">Tamanho máximo da sinopse</label>
+              <select class="entrada" id="cfg-limite">${[250, 350, 500].map((n) => `<option value="${n}" ${Number(c.limite) === n ? 'selected' : ''}>${n} letras${n === 350 ? ' (3 linhas)' : ''}</option>`).join('')}</select></div>
+          </div></section>
+        <section class="cfg-grupo"><h2>Aparência e programa</h2>
+          ${opcao('claro', document.body.classList.contains('claro'), 'Tema claro', 'Fundo branco em vez do escuro')}
+          ${opcao('animacoes', !document.body.classList.contains('sem-animacao'), 'Animações', 'Janelas e avisos com movimento')}
+          ${opcao('navegador', S.E.visivel, 'Mostrar o navegador enquanto trabalha', 'Para ver o programa preenchendo os sites')}
+          ${opcao('fechar', c.confirmar_fechar, 'Perguntar antes de fechar o programa', 'Durante um envio ele sempre pergunta')}
+          ${opcao('atualizar', c.atualizacoes, 'Avisar quando sair versão nova', 'Instala ali mesmo e mantém seus dados')}
+          <button class="btn-azul pequeno" id="cfg-procurar" type="button">Procurar atualização agora</button></section>
+      </div><div class="cfg-coluna">
+        <section class="cfg-grupo"><h2>Ao importar</h2>
+          ${opcao('idiomas', c.analisar_idiomas, 'Ver os idiomas disponíveis no TMDB', 'Deixa completar o inglês com outros idiomas')}
+          ${opcao('serie', c.pagina_serie, 'Mostrar a página da série no topo', 'Item SÉRIE e sinopse da temporada antes do E01')}
+          ${opcao('temporada', c.sinopse_temporada, 'Importar também a sinopse da temporada', 'Aparece como primeiro item (TEMP)')}
+          ${opcao('prefixo', c.conferir_prefixo, 'Conferir prefixo dos títulos na Wiki', 'Oferece “Quest 01:” quando o TMDB não traz')}</section>
+        <section class="cfg-grupo"><h2>Ao enviar</h2>
+          ${opcao('revisar', c.revisar_envio, 'Revisar a tradução antes de enviar', 'Aponta sinopses longas e nomes que sumiram')}
+          ${opcao('tvdb', c.usar_tvdb, 'Usar o TVDB', 'Mostra a conta do TVDB e a opção na janela de envio')}</section>
+      </div></div>`,
+      botoes: [] });
+    const salvarConfig = async (chave = null) => {
+      const f = fundo;
+      const r = await chamar('salvar_config', chave, $('#cfg-idioma', f).value, $('#cfg-limite', f).value, $('#cfg-temporada', f).checked, $('#cfg-prefixo', f).checked, $('#cfg-revisar', f).checked, $('#cfg-idiomas', f).checked, $('#cfg-serie', f).checked, $('#cfg-atualizar', f).checked, $('#cfg-tvdb', f).checked, $('#cfg-fechar', f).checked);
+      S.usarTvdb = r.usar_tvdb; renderLoginTvdb();
+      S.temChave = r.tem_chave; S.limite = Number(r.limite); S.E.idioma = r.idioma;
+      aplicarTema($('#cfg-claro', f).checked);
+      aplicarAnimacoes($('#cfg-animacoes', f).checked);
+      S.E.visivel = await chamar('mostrar_navegador', $('#cfg-navegador', f).checked);
+      renderTudo();
+    };
+    $$('input.chave, select', fundo).forEach((x) => { x.onchange = () => salvarConfig(); });
     $('#cfg-testar', fundo).onclick = async () => {
       const chave = $('#cfg-chave', fundo).value.trim(), out = $('#cfg-resultado', fundo);
       if (!chave) { out.textContent = 'Cole a chave para testar.'; out.className = 'erro-txt'; return; }
       out.textContent = 'Testando...'; out.className = '';
       const t = await chamar('testar_chave', chave);
-      out.textContent = t.ok ? 'Chave válida!' : 'Chave não aceita: ' + t.erro;
+      out.textContent = t.ok ? '✓ Chave salva e funcionando' : 'Chave não aceita: ' + t.erro;
       out.className = t.ok ? 'ok-txt' : 'erro-txt';
+      if (t.ok) { await salvarConfig(chave); $('#cfg-chave', fundo).value = ''; }
     };
     $('#cfg-procurar', fundo).onclick = (ev) => { ev.preventDefault(); procurarAtualizacao(true); };
     $('#cfg-ajuda', fundo).onclick = (ev) => {
@@ -1170,20 +1192,28 @@
 
   async function abrirMinhasSeries() {
     const r = await chamar('minhas_series');
+    const n = await chamar('estatisticas');
+    const numeros = `<div class="numeros">
+        <div class="numero"><b>${n.enviados}</b><span>episódios enviados</span></div>
+        <div class="numero"><b>${n.series}</b><span>séries · ${n.temporadas} temporadas</span></div>
+        <div class="numero"><b>${n.tmdb}</b><span>no TMDB</span></div>
+        <div class="numero"><b>${n.tvdb}</b><span>no TVDB</span></div></div>`;
     const data = (q) => q ? q.slice(8, 10) + '/' + q.slice(5, 7) + '/' + q.slice(0, 4) : '';
-    const cartao = (s) => `<div class="serie-cartao" data-codigo="${esc(s.codigo)}">
-        <div class="serie-topo"><div><b>${esc(s.nome)}</b><small>Último envio: ${data(s.ultimo)}</small></div>
-          ${r.tem_chave ? `<div class="linha-flex"><button class="btn-sec btn-mudancas" title="Ver se alguém mudou ou apagou o que você enviou">${ic('repetir')} Conferir mudanças</button>
-            <button class="btn-sec btn-cobertura">${ic('globo')} Conferir no TMDB</button></div>` : ''}</div>
-        <div class="serie-temps">${s.temporadas.map((t) => `<button class="temp-chip" data-temp="${esc(t.numero)}" title="Escolher esta temporada no topo">
-          T${esc(t.numero)} <span>${t.enviados} enviados</span></button>`).join('')}</div>
-        <div class="serie-cob"></div></div>`;
-    const { fundo, fechar } = modal({ icone: 'filme', titulo: 'Minhas séries',
-      texto: 'O que você já enviou, por série e temporada (a partir do Histórico). Clique numa temporada para escolhê-la no topo e continuar.',
-      corpo: r.series.length ? `<div class="series-lista">${r.series.map(cartao).join('')}</div>`
+    const cartao = (s) => `<div class="serie-cartao" data-codigo="${esc(s.codigo)}" data-nome="${esc((s.nome || '').toLowerCase())}">
+        ${s.poster ? `<img class="poster-g" src="${esc(s.poster)}" alt="">` : '<div class="poster-g" aria-hidden="true"></div>'}
+        <div class="serie-info"><div><b class="serie-nome">${esc(s.nome || 'Série do TVDB')}</b><small>Último envio ${data(s.ultimo)}</small></div>
+        <div class="serie-temps">${s.temporadas.map((t) => `<button class="temp-chip" data-temp="${esc(t.numero)}" ${s.codigo ? '' : 'disabled'} title="Escolher esta temporada">
+          <b>T${esc(t.numero)}</b> <span>${t.enviados} enviados</span></button>`).join('')}</div>
+        ${r.tem_chave && s.codigo ? `<div class="linha-flex"><button class="btn-azul pequeno btn-mudancas" title="Ver se alguém mudou ou apagou o que você enviou">${ic('repetir')} Conferir mudanças</button>
+            <button class="btn-azul pequeno btn-cobertura">${ic('globo')} Quanto falta no TMDB</button></div>` : ''}
+        <div class="serie-cob"></div></div></div>`;
+    const { fundo, fechar } = modal({ pagina: 'btn-minhas', icone: 'filme', titulo: 'Minhas séries',
+      texto: 'Tudo o que você já enviou. Clique numa temporada para continuar de onde parou.',
+      corpo: r.series.length ? `<input class="entrada busca-pagina" id="serie-busca" type="search" placeholder="Procurar série" aria-label="Procurar série">` + numeros + `<div class="series-lista">${r.series.map(cartao).join('')}</div>`
         : '<div class="nota neutra">Nada enviado ainda. Depois do primeiro envio, suas séries aparecem aqui.</div>',
-      botoes: [{ txt: 'Fechar', cls: 'btn-pri' }] });
-    $('.modal', fundo).classList.add('largo');
+      botoes: [] });
+    const buscaSerie = $('#serie-busca', fundo);
+    if (buscaSerie) buscaSerie.oninput = () => { const q = buscaSerie.value.trim().toLowerCase(); $$('.serie-cartao', fundo).forEach((c) => { c.hidden = !!q && !c.dataset.nome.includes(q); }); };
     $$('.temp-chip', fundo).forEach((b) => b.onclick = async () => {
       if (!(await podeSubstituirLista())) return;
       const c = b.closest('.serie-cartao').dataset.codigo;
@@ -1251,36 +1281,43 @@
   }
 
   function abrirGuia() {
-    modal({ icone: 'livro', titulo: 'Como usar o Sinopse Editor', texto: 'As etapas podem ser feitas em qualquer ordem, e o trabalho é guardado sozinho.',
-      corpo: `<div class="passos">
-        <div class="passo"><b><span class="num">1</span>Escolha a série</b><span>Busque pelo nome (com a chave da API) ou pelo código do TMDB, no topo. Escolha a temporada nas etiquetas.</span></div>
-        <div class="passo"><b><span class="num">2</span>Importe os textos</b><span>Do TMDB em inglês, de uma Wiki, de uma planilha — ou várias temporadas e séries pelo Lote.</span></div>
-        <div class="passo"><b><span class="num">3</span>Traduza</b><span>“Copiar para traduzir” leva as instruções prontas. Cole no ChatGPT ou Claude, copie a resposta inteira e clique em “Colar tradução”.</span></div>
-        <div class="passo"><b><span class="num">4</span>Confira e envie</b><span>Clique num episódio para revisar ao lado. Escolha manter ou substituir o que já existe e envie.</span></div></div>
-        <div class="nota neutra"><b>Atalhos:</b> ↑ ↓ (ou J K) passam de episódio · Espaço marca/desmarca · Enter edita o título · Ctrl+F localiza e substitui · Shift+clique marca uma faixa.</div>
-        <div class="nota neutra">Dica: no primeiro envio de uma série, deixe marcados só 1 ou 2 episódios e confira no site do TMDB.</div>
-        <p style="margin:0;font-size:12px;color:var(--apagado)">Este programa usa a API do TMDB, mas não é aprovado nem certificado pelo TMDB.</p>`,
-      botoes: [{ txt: 'Fechar', cls: 'btn-pri' }] });
+    const passo = (n, t, x) => `<li class="passo-novo"><span class="num-novo">${n}</span><b>${t}</b><span>${x}</span></li>`;
+    const tecla = (k, x) => `<kbd>${k}</kbd><span>${x}</span>`;
+    modal({ pagina: 'btn-guia', icone: 'livro', titulo: 'Como usar o Sinopse Editor', texto: 'Quatro passos, do texto original até o site. O trabalho é guardado sozinho.',
+      corpo: `<ol class="passos-novos">
+          ${passo(1, 'Escolha a série', 'Busque pelo nome ou pelo código do TMDB. Depois escolha a temporada.')}
+          ${passo(2, 'Importe os textos', 'Do TMDB, de uma Wiki, do TVDB ou de uma planilha. Para várias temporadas, use o Lote.')}
+          ${passo(3, 'Traduza', '“Copiar para traduzir” leva as instruções. Cole na sua IA, copie a resposta inteira e clique em “Colar tradução”.')}
+          ${passo(4, 'Confira e envie', 'Revise cada episódio. Escolha o site (TMDB, TVDB ou os dois) e se mantém ou substitui o que já existe.')}</ol>
+        <div class="guia-duas"><section class="cfg-grupo"><h2>Atalhos do teclado</h2><div class="atalhos">
+          ${tecla('↑ ↓ ou J K', 'Passar de episódio')}${tecla('Espaço', 'Marcar ou desmarcar')}${tecla('Enter', 'Editar o título')}${tecla('Ctrl + F', 'Localizar e substituir')}${tecla('Shift + clique', 'Marcar uma faixa de episódios')}</div></section>
+        <section class="cfg-grupo"><h2>Dicas</h2><ul class="dicas">
+          <li>No primeiro envio de uma série, marque só 1 ou 2 episódios e confira no site.</li>
+          <li>Enviou algo errado? O Histórico guarda o texto antigo e permite desfazer.</li>
+          <li>Quer trabalhar em outra série sem perder esta? Salve a lista em Trabalhos salvos.</li></ul></section></div>
+        <p class="rodape-tmdb">Este programa usa a API do TMDB, mas não é endossado nem certificado pelo TMDB.</p>`,
+      botoes: [] });
   }
 
   async function abrirTrabalhos() {
-    const desenhar = (lista) => lista.length ? lista.map((t) => `
-      <div class="caixa-info" style="flex-direction:row;align-items:center;gap:12px">
-        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
-          <b style="color:var(--texto)">${esc(t.nome)}</b>
-          <span>${esc(t.grupos.join(' · '))}${t.grupos.length >= 4 ? ' ...' : ''}</span>
-          <span>${t.total} episódios · ${t.faltam} pendentes · salvo em ${esc(t.quando)}</span></div>
-        <button class="btn-sec" data-abrir="${esc(t.arquivo)}">Abrir</button>
-        <button class="btn-icone" data-excluir="${esc(t.arquivo)}" aria-label="Excluir ${esc(t.nome)}" style="width:38px;height:38px">${ic('lixo')}</button>
-      </div>`).join('') : '<span style="font-size:13px;color:var(--apagado)">Nenhum trabalho salvo ainda.</span>';
+    const desenhar = (lista) => lista.length ? lista.map((t) => {
+      const feitos = t.total - t.faltam, pct = t.total ? Math.round(feitos / t.total * 100) : 0, ok = !t.faltam && t.total;
+      return `<div class="salvo-linha">
+        <div class="salvo-nome"><b>${esc(t.nome)}</b><span>${esc(t.grupos.join(' · '))}${t.grupos.length >= 4 ? ' ...' : ''}</span></div>
+        <div class="salvo-prog"><span class="${ok ? 'ok-txt' : ''}">${feitos} de ${t.total} enviados · ${ok ? 'completo' : 'faltam ' + t.faltam}</span><div class="barra-nova"><i class="${ok ? 'ok' : ''}" style="width:${pct}%"></i></div></div>
+        <span class="salvo-data">Salvo em ${esc(t.quando)}</span>
+        <button class="btn-azul" data-abrir="${esc(t.arquivo)}">Abrir</button>
+        <button class="btn-icone" data-excluir="${esc(t.arquivo)}" aria-label="Excluir ${esc(t.nome)}">${ic('lixo')}</button>
+      </div>`; }).join('') : '<span class="apagado">Nenhum trabalho salvo ainda.</span>';
     const r = await chamar('listar_trabalhos');
     const sugestao = S.E.episodios.length ? (grupos(S.E.episodios).size > 1 ? 'Lote ' : '') + (S.E.episodios[0].serie || 'Trabalho') : '';
-    const { fundo, fechar } = modal({ icone: 'salvos', titulo: 'Trabalhos salvos',
-      texto: 'Guarde a lista atual com um nome para continuar outro dia, e abra outro trabalho quando quiser. O trabalho em andamento continua sendo guardado sozinho.',
-      corpo: `<div class="linha-flex"><input class="entrada" id="trab-nome" type="text" placeholder="Nome do trabalho" value="${esc(sugestao)}" style="flex:1">
-          <button class="btn-pri" id="trab-salvar">${ic('salvos')} Salvar a lista atual</button></div>
-        <div id="trab-lista" style="display:flex;flex-direction:column;gap:8px">${desenhar(r.trabalhos)}</div>`,
-      botoes: [{ txt: 'Fechar' }] });
+    const { fundo, fechar } = modal({ pagina: 'btn-trabalhos', icone: 'salvos', titulo: 'Trabalhos salvos',
+      texto: 'Guarde a lista atual com um nome e volte a ela outro dia. O trabalho em andamento já é guardado sozinho.',
+      corpo: `<div class="salvar-cartao"><label for="trab-nome" class="cfg-rotulo">Salvar a lista atual (${S.E.episodios.length} episódios) como</label>
+          <div class="linha-flex"><input class="entrada" id="trab-nome" type="text" placeholder="Nome do trabalho" value="${esc(sugestao)}" style="flex:1">
+          <button class="btn-pri padrao" id="trab-salvar">${ic('salvos')} Salvar</button></div></div>
+        <div id="trab-lista" class="salvos-lista">${desenhar(r.trabalhos)}</div>`,
+      botoes: [] });
     const lista = $('#trab-lista', fundo);
     $('#trab-salvar', fundo).onclick = async () => {
       const res = await chamar('salvar_trabalho_como', $('#trab-nome', fundo).value);
@@ -1303,43 +1340,60 @@
   let historicoAberto = null;
   async function abrirHistorico() {
     const r = await chamar('ler_historico');
-    const n = await chamar('estatisticas');
-    const numeros = `<div class="numeros">
-        <div class="numero"><b>${n.enviados}</b><span>episódios enviados</span></div>
-        <div class="numero"><b>${n.series}</b><span>séries · ${n.temporadas} temporadas</span></div>
-        <div class="numero"><b>${n.semana}</b><span>nos últimos 7 dias · ${n.hoje} hoje</span></div>
-        <div class="numero"><b>${n.sinopses}</b><span>sinopses · ${n.titulos} títulos</span></div></div>`;
     const regs = r.registros || [];
     const corte = (t) => esc((t || '').length > 140 ? t.slice(0, 140) + '…' : (t || ''));
     const mud = (campo, antes, depois) => antes === undefined ? '' :
       `<div class="hist-mud">${campo}: ${antes ? `<del>${corte(antes)}</del>` : '<i>vazio</i>'} → <ins>${depois ? corte(depois) : '<i>vazio</i>'}</ins></div>`;
-    const corpo = numeros + (regs.length ? `<div style="display:flex;flex-direction:column;gap:8px">${regs.map((h) => `
-      <label class="hist-linha">
+    const conta = { todos: regs.length, TMDB: regs.filter((h) => (h.site || 'TMDB') === 'TMDB').length, TVDB: regs.filter((h) => h.site === 'TVDB').length, desfeitos: regs.filter((h) => h.tipo === 'desfazer').length };
+    const hoje = new Date(), diaDe = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const ontem = new Date(hoje.getTime() - 864e5);
+    const nomeDia = (q) => { const d = q.slice(0, 10); return d === diaDe(hoje) ? 'HOJE' : d === diaDe(ontem) ? 'ONTEM' : `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`; };
+    const linha = (h) => { const site = h.site || 'TMDB', desf = h.tipo === 'desfazer';
+      return `<label class="hist-nova" data-site="${esc(site)}" data-desf="${desf ? 1 : 0}" data-busca="${esc(((h.serie || '') + ' T' + h.temporada + ' E' + h.numero).toLowerCase())}">
         <input type="checkbox" value="${esc(h.id)}" aria-label="Escolher para desfazer">
-        <span class="quando">${esc(h.quando.slice(8, 10) + '/' + h.quando.slice(5, 7) + ' ' + h.quando.slice(11, 16))}</span>
-        <span><span class="qual">${esc(h.serie || 'Série ' + h.codigo)} · T${esc(h.temporada)} E${esc(h.numero)} <span style="color:#6E778C;font-weight:400">(${esc(h.idioma)})</span></span>
+        <span class="hora">${esc(h.quando.slice(11, 16))}</span>
+        <span class="selo ${site === 'TVDB' ? 's-Traduzido' : 'selo-ok'}">${esc(site)}</span>
+        <span class="hist-txt"><b>${esc(h.serie || (h.codigo ? 'Série ' + h.codigo : 'Série do TVDB'))} · T${esc(h.temporada)} E${esc(h.numero)}</b>
           ${mud('Título', h.antes?.titulo, h.depois?.titulo)}${mud('Sinopse', h.antes?.sinopse, h.depois?.sinopse)}</span>
-        <span class="hist-tipo ${h.tipo === 'desfazer' ? 'desfeito' : ''}">${h.tipo === 'desfazer' ? 'Desfeito' : 'Enviado'}</span>
-      </label>`).join('')}</div>`
-      : '<div class="vazio" style="padding:40px"><div class="icone-grande">' + ic('relogio', 'i-20') + '</div><h3>Nenhum envio ainda</h3><p>Cada episódio enviado aparece aqui, com o texto que havia antes no TMDB.</p></div>');
-    const m = modal({ icone: 'relogio', titulo: 'Histórico de envios',
-      texto: 'O que foi enviado, quando, e o texto que havia antes. Marque e clique em “Desfazer” para devolver o texto antigo ao TMDB.',
-      corpo, info: regs.length ? `${regs.length} envio(s) registrados` : '',
-      botoes: [{ txt: 'Fechar' }, ...(regs.length ? [{ txt: 'Desfazer selecionados', cls: 'btn-pri amarelo', icone: 'desfazer', acao: async (f) => {
-        const ids = $$('input[type="checkbox"]:checked', f).map((c) => c.value);
-        if (!ids.length) { aviso('Marque pelo menos um envio para desfazer.'); return true; }
-        if (!(await confirmar('Desfazer envios?', `O texto antigo de ${ids.length} envio(s) vai voltar para o TMDB.`, 'Desfazer', true))) return true;
+        <span class="selos curto"><span class="selo ${desf ? 's-Editado' : 'selo-ok'}">${desf ? 'Desfeito' : 'Enviado'}</span></span></label>`; };
+    let dias = '', ultimo = '';
+    regs.forEach((h) => { const d = nomeDia(h.quando); if (d !== ultimo) { dias += `<div class="dia-cab">${d}</div>`; ultimo = d; } dias += linha(h); });
+    const corpo = regs.length ? `<div class="hist-topo"><div class="filtros" id="hist-filtros">
+          <button data-h="todos" aria-pressed="true">Todos ${conta.todos}</button><button data-h="TMDB" aria-pressed="false">TMDB ${conta.TMDB}</button>
+          <button data-h="TVDB" aria-pressed="false">TVDB ${conta.TVDB}</button><button data-h="desf" aria-pressed="false">Desfeitos ${conta.desfeitos}</button></div>
+          <input class="entrada busca-pagina" id="hist-busca" type="search" placeholder="Procurar série ou episódio" aria-label="Procurar série ou episódio"></div>
+        <section class="hist-caixa" id="hist-caixa">${dias}</section>
+        <div class="hist-barra" id="hist-barra" hidden><span id="hist-qtd"></span><button class="btn-sec padrao" id="hist-limpar">Limpar seleção</button><button class="btn-pri padrao laranja" id="hist-desfazer">${ic('desfazer')} Desfazer</button></div>`
+      : '<div class="nota neutra">Nenhum envio ainda. Cada episódio enviado aparece aqui, com o texto que havia antes.</div>';
+    const m = modal({ pagina: 'btn-historico', icone: 'relogio', titulo: 'Histórico de envios',
+      texto: 'Cada campo enviado, com o texto que havia antes. Marque e desfaça se precisar.', corpo, botoes: [] });
+    if (regs.length) {
+      const f = m.fundo, marcadas = () => $$('#hist-caixa input:checked', f);
+      const atualizar = () => { const n = marcadas().length; $('#hist-barra', f).hidden = !n; $('#hist-qtd', f).innerHTML = `<b>${n} envio${n > 1 ? 's' : ''} selecionado${n > 1 ? 's' : ''}</b> · o texto antigo volta para o site de onde saiu`; };
+      let filtro = 'todos';
+      const filtrar = () => { const q = $('#hist-busca', f).value.trim().toLowerCase();
+        $$('.hist-nova', f).forEach((l) => { l.hidden = !((filtro === 'todos' || (filtro === 'desf' ? l.dataset.desf === '1' : l.dataset.site === filtro)) && (!q || l.dataset.busca.includes(q))); });
+        $$('.dia-cab', f).forEach((c) => { let x = c.nextElementSibling, ver = false; while (x && !x.classList.contains('dia-cab')) { if (!x.hidden) ver = true; x = x.nextElementSibling; } c.hidden = !ver; }); };
+      $$('#hist-filtros button', f).forEach((b) => b.onclick = () => { filtro = b.dataset.h; $$('#hist-filtros button', f).forEach((x) => x.setAttribute('aria-pressed', String(x === b))); filtrar(); });
+      $('#hist-busca', f).oninput = filtrar;
+      $('#hist-caixa', f).onchange = atualizar;
+      $('#hist-limpar', f).onclick = () => { marcadas().forEach((c) => { c.checked = false; }); atualizar(); };
+      $('#hist-desfazer', f).onclick = async () => {
+        const ids = marcadas().map((c) => c.value);
+        if (!(await confirmar('Desfazer envios?', `O texto antigo de ${ids.length} envio(s) vai voltar para o site de onde saiu (TMDB ou TVDB).`, 'Desfazer', true))) return;
         const res = await chamar('desfazer', ids);
-        if (res.precisa_login) { pedirLogin('Para desfazer no TMDB, o programa precisa da sua conta.'); return true; }
+        if (res.precisa_login) { pedirLogin('Para desfazer no TMDB, o programa precisa da sua conta.'); return; }
+        if (res.precisa_login_tvdb) { aviso('Para desfazer no TVDB, entre antes pelo botão “TVDB” no topo.', 6000); return; }
         resultado(res);
-        if (res.ok) aviso(`Desfazendo ${res.total} envio(s)... acompanhe pelo rodapé.`);
-      } }] : [])] });
+        if (res.ok) aviso(`Desfazendo ${res.total} envio(s)... acompanhe a barra de progresso.`);
+      };
+    }
     historicoAberto = m;
   }
 
   async function tentarDeNovo() {
     const falhas = S.E.episodios.filter((e) => e.situacao === 'Falhou');
-    if (!falhas.length) return;
+    if (!falhas.length) { if (S.E.episodios.some(problemaTvdb)) enviar(); return; }
     const outros = S.E.episodios.filter((e) => e.enviar && e.situacao !== 'Falhou' && !finalizado(e));
     if (outros.length && !(await confirmar('Tentar de novo só os que falharam?',
       `Os ${outros.length} outros episódios marcados serão desmarcados, e só os ${falhas.length} que falharam serão enviados.`, 'Continuar'))) return;
@@ -1352,34 +1406,65 @@
   async function enviar() {
     const p = await chamar('preparar_envio');
     if (p.precisa_login) { pedirLogin('Para enviar ao TMDB, o programa precisa da sua conta.'); return; }
-    if (!p.total) { aviso(p.sem_codigo ? 'Os episódios marcados estão sem o código da série. Escolha a série no topo.' : 'Nenhum episódio marcado com título ou sinopse.'); return; }
-    let regra, amarela = S.sub.t || S.sub.s;
-    if (S.sub.t && S.sub.s) regra = 'Títulos e sinopses que já existem no TMDB serão <b>substituídos</b>.';
-    else if (S.sub.t) regra = 'Títulos que já existem serão <b>substituídos</b>. Sinopses existentes serão mantidas.';
-    else if (S.sub.s) regra = 'Sinopses que já existem serão <b>substituídas</b>. Títulos existentes serão mantidos.';
-    else regra = 'O que já existe no TMDB será mantido; só os campos vazios serão preenchidos.';
-    let previsao = '';
-    if (p.previsao) {
-      const ex = p.existentes, trocaT = S.sub.t ? ex.titulo : 0, trocaS = S.sub.s ? ex.sinopse : 0;
-      const mantT = S.sub.t ? 0 : ex.titulo, mantS = S.sub.s ? 0 : ex.sinopse;
-      const partes = [];
-      if (trocaT || trocaS) partes.push(`<b>Serão trocados:</b> ${trocaT} título(s) e ${trocaS} sinopse(s) que já existem no TMDB.`);
-      if (mantT || mantS) partes.push(`<b>Serão mantidos:</b> ${mantT} título(s) e ${mantS} sinopse(s) que já existem.`);
-      if (!ex.titulo && !ex.sinopse) partes.push('Nenhum desses episódios tem texto em português no TMDB ainda.');
-      previsao = `<div class="nota neutra">${partes.join('<br>')}${trocaT || trocaS ? '<br>O texto antigo fica guardado no Histórico e pode ser desfeito.' : ''}</div>`;
-    } else if (amarela) {
-      previsao = '<div class="nota neutra">O texto antigo de cada campo trocado fica guardado no Histórico e pode ser desfeito.</div>';
-    }
-    const { fundo: fundoEnvio, fechar: fecharEnvio } = modal({ icone: amarela ? 'alerta' : 'enviar', alerta: amarela, titulo: `Enviar ${p.total} episódio${p.total > 1 ? 's' : ''} em ${p.idioma}?`,
-      corpo: `<ul class="lista-grupos">${p.grupos.map((g) => `<li><span>${esc(g.nome)}</span><span>${g.quantidade} ep.</span></li>`).join('')}</ul>
-        <div class="nota ${amarela ? 'amarela' : 'neutra'}">${regra}</div>${previsao}
+    const tv = p.tvdb || { destinos: [] };
+    if (!p.total && !tv.total) { aviso(p.sem_codigo ? 'Os episódios marcados estão sem o código da série. Escolha a série no topo.' : 'Nenhum episódio marcado com título ou sinopse.'); return; }
+    const ex = p.existentes || {};
+    const chave = (campo, nome, n) => `<div class="troca"><span class="troca-nome">${nome}</span>
+      <div class="segmento" data-campo="${campo}"><button type="button" data-v="0" aria-pressed="${!S.sub[campo]}">Manter</button><button type="button" data-v="1" aria-pressed="${S.sub[campo]}">Substituir</button></div>
+      ${p.previsao ? `<span class="apagado">${n ? `${n} já existe${n > 1 ? 'm' : ''}` : 'nenhum existe ainda'}</span>` : ''}</div>`;
+    const { fundo: fundoEnvio, fechar: fecharEnvio } = modal({ icone: 'enviar', titulo: `Enviar ${p.total || tv.total} episódio${(p.total || tv.total) > 1 ? 's' : ''}`, texto: esc(p.grupos.map((g) => g.nome).join(' · ') + ' · ' + p.idioma),
+      corpo: `
+        ${tv.destinos.length ? `<div class="nota neutra" id="env-tvdb">
+          <b class="bloco-rotulo">Para onde enviar</b>
+          <div class="sites"><label class="site"><input type="checkbox" id="env-site-tmdb" ${p.total ? 'checked' : 'disabled'}><span><b>TMDB</b><small>${p.total} episódio(s)</small></span></label>
+          <label class="site"><input type="checkbox" id="env-site-tvdb" ${tv.ligado && tv.idioma_ok ? 'checked' : ''} ${tv.idioma_ok ? '' : 'disabled'}><span><b>TVDB</b><small>${tv.total} episódio(s)${tv.ja_enviados ? ` (${tv.ja_enviados} já foi ao TMDB)` : ''}</small></span></label></div>
+          <div id="env-tvdb-det" style="margin-top:10px;display:none">
+            ${tv.idioma_ok ? '' : '<span class="erro-txt">O TVDB só recebe pt-BR ou pt-PT.</span>'}
+            ${tv.logado ? '' : '<div class="nota amarela" style="margin:0 0 8px">Você ainda não entrou no TVDB. <a href="#" id="env-tvdb-login">Entrar no TVDB</a> (a janela fecha sozinha no final).</div>'}
+            ${tv.ja_enviados ? `<div style="font-size:13px;margin-bottom:8px">${tv.total} episódio(s) vão ao TVDB, incluindo ${tv.ja_enviados} já enviado(s) antes ao TMDB.</div>` : ''}
+            ${tv.destinos.every((d) => d.link) ? `<div class="tvdb-resumo"><span>${tv.destinos.map((d) => `No TVDB: <b>${esc((d.link.match(/series\/([^/?#]+)/) || [])[1] || d.link)}</b> · temporada ${esc(d.temporada_tvdb)}${Number(d.deslocamento) ? ` · somar ${esc(d.deslocamento)}` : ' · mesma numeração'}`).join('<br>')}</span><a href="#" id="env-tvdb-alterar">Alterar</a></div>` : ''}
+            <div id="env-tvdb-campos" ${tv.destinos.every((d) => d.link) ? 'hidden' : ''}>${tv.destinos.map((d, n) => `<div class="grade-tvdb" data-dest="${n}">
+              <div class="campo"><label>${esc(d.nome)} — temporada ${esc(d.temporada)}: link da série no TVDB</label><input class="entrada" data-k="link" placeholder="https://thetvdb.com/series/nome-da-serie" value="${esc(d.link)}"></div>
+              <div class="campo"><label>Temporada no TVDB</label><input class="entrada" data-k="temporada_tvdb" value="${esc(d.temporada_tvdb)}"></div>
+              <div class="campo"><label title="Se o E01 daqui é o E05 no TVDB, coloque 4">Somar ao nº do episódio</label><input class="entrada" data-k="deslocamento" type="number" value="${esc(d.deslocamento)}"></div></div>`).join('')}
+            <span style="font-size:12px;color:var(--apagado)">Usa a numeração “oficial” do TVDB. Cole o link da série (ou da temporada). O programa lembra para as próximas vezes.</span></div>
+          </div></div>` : ''}
+        <div class="troca-bloco"><b class="bloco-rotulo">Se o site já tiver texto em português</b>${chave('t', 'Títulos', ex.titulo)}${chave('s', 'Sinopses', ex.sinopse)}</div>
         ${p.sem_codigo ? `<div class="nota neutra">${p.sem_codigo} episódio(s) sem código da série ficarão de fora.</div>` : ''}
         ${(p.revisao || []).length ? `<div class="nota amarela"><b>Revisão: ${p.revisao.length} episódio(s) para dar uma olhada</b> (clique para abrir; você pode enviar assim mesmo)
           <div class="revisao">${p.revisao.slice(0, 40).map((r) => `<button class="rev-item" data-id="${esc(r.id)}"><b>${esc(r.rotulo)}</b> ${r.itens.map(esc).join(' · ')}</button>`).join('')}
           ${p.revisao.length > 40 ? `<span>... e mais ${p.revisao.length - 40}</span>` : ''}</div></div>` : ''}`,
-      botoes: [{ txt: 'Cancelar' }, { txt: 'Enviar agora', cls: 'btn-pri verde', icone: 'enviar', acao: async () => {
-        resultado(await chamar('enviar', S.sub.t, S.sub.s));
+      botoes: [{ txt: 'Cancelar' }, { txt: 'Enviar agora', cls: 'btn-pri', icone: 'enviar', acao: async () => {
+        const tmdb = $('#env-site-tmdb', fundoEnvio)?.checked ?? true;
+        let tvdb = null;
+        if ($('#env-site-tvdb', fundoEnvio)?.checked) {
+          tvdb = $$('[data-dest]', fundoEnvio).map((linha) => {
+            const d = Object.assign({}, tv.destinos[Number(linha.dataset.dest)]);
+            $$('[data-k]', linha).forEach((c) => { d[c.dataset.k] = c.value.trim(); });
+            const m = d.link.match(/thetvdb\.com\/series\/[^/?#]+\/seasons\/[a-z]+\/(\d+)/i);
+            if (m && !linha.querySelector('[data-k="temporada_tvdb"]').dataset.mexeu) d.temporada_tvdb = m[1];
+            return d;
+          });
+          if (tvdb.some((d) => !d.link)) { aviso('Cole o link do TVDB de cada temporada (ou desmarque o TVDB).'); return true; }
+        }
+        if (!tmdb && !tvdb) { aviso('Escolha pelo menos um site.'); return true; }
+        resultado(await chamar('enviar', S.sub.t, S.sub.s, tmdb, tvdb));
       } }] });
+    $$('.segmento', fundoEnvio).forEach((g) => $$('button', g).forEach((b) => b.onclick = () => {
+      S.sub[g.dataset.campo] = b.dataset.v === '1';
+      $$('button', g).forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    }));
+    $('.modal', fundoEnvio).style.maxWidth = '640px';
+    const caixaTvdb = $('#env-site-tvdb', fundoEnvio);
+    if (caixaTvdb) {
+      const mostrar = () => { $('#env-tvdb-det', fundoEnvio).style.display = caixaTvdb.checked ? '' : 'none'; };
+      caixaTvdb.onchange = mostrar; mostrar();
+      $$('[data-k="temporada_tvdb"]', fundoEnvio).forEach((c) => c.oninput = () => { c.dataset.mexeu = '1'; });
+      const alterar = $('#env-tvdb-alterar', fundoEnvio);
+      if (alterar) alterar.onclick = (ev) => { ev.preventDefault(); $('#env-tvdb-campos', fundoEnvio).hidden = false; alterar.parentElement.hidden = true; };
+      const entrar = $('#env-tvdb-login', fundoEnvio);
+      if (entrar) entrar.onclick = (ev) => { ev.preventDefault(); chamar('entrar_tvdb'); };
+    }
     $$('.rev-item', fundoEnvio).forEach((b) => b.onclick = () => {
       fecharEnvio();
       S.filtro = 'todos';
@@ -1466,10 +1551,24 @@
     $('#btn-limpar').onclick = async () => {
       if (S.E.episodios.length && await confirmar('Limpar a lista?', 'Todos os episódios da lista serão apagados.', 'Limpar')) chamar('limpar');
     };
-    $('#btn-conta').onclick = async () => {
-      if (S.login === 'conectado' && !(await confirmar('Você já está conectado', 'Sua conta do TMDB já está conectada. Quer entrar com outra conta?', 'Entrar com outra'))) return;
-      chamar('entrar');
+    const janelaConta = (site, conectado, entrar, sair, aoSair) => {
+      modal({ estreito: true, icone: 'usuario', titulo: `Conta do ${site}`,
+        texto: conectado ? `<b class="ok-txt">● Conectado.</b> Seu login está salvo só neste computador. Se o envio pedir login de novo, é porque ele expirou: entre outra vez.`
+          : `Abre uma janela do ${site} para você entrar. Ela fecha sozinha no final, e o login fica salvo só neste computador.`,
+        botoes: conectado ? [{ txt: 'Sair da conta', acao: async () => { await chamar(sair); aoSair(); aviso(`Você saiu da conta do ${site}.`); } }, { txt: 'Entrar de novo', cls: 'btn-pri', acao: () => { chamar(entrar); } }]
+          : [{ txt: 'Agora não' }, { txt: `Entrar no ${site}`, cls: 'btn-pri', acao: () => { chamar(entrar); } }] });
     };
+    $('#btn-conta-tvdb').onclick = () => janelaConta('TVDB', S.loginTvdb, 'entrar_tvdb', 'sair_tvdb', () => { S.loginTvdb = false; renderLoginTvdb(); renderRodape(); });
+    $('#btn-conta').onclick = () => janelaConta('TMDB', S.login === 'conectado', 'entrar', 'sair_tmdb', () => { S.login = 'desconectado'; renderLogin(); });
+    // Menus (Importar e ⋯): abrem no clique, fecham ao escolher ou clicar fora.
+    document.addEventListener('click', (ev) => {
+      const abre = ev.target.closest('[data-menu]');
+      $$('.menu.aberto').forEach((m) => { if (!abre || m !== abre.parentElement) m.classList.remove('aberto'); });
+      if (abre) abre.parentElement.classList.toggle('aberto');
+      if (!ev.target.closest('.busca, #btn-trocar')) document.body.classList.remove('trocando');
+    });
+    $$('[data-ver]').forEach((b) => b.onclick = () => { S.filtro = b.dataset.ver; $$('#filtros button').forEach((x) => x.setAttribute('aria-pressed', 'false')); renderLista(); });
+    $$('.trilho-btn').filter((b) => !b.id).forEach((b) => b.onclick = fecharPagina);
     $('#btn-navegador').onclick = async () => { S.E.visivel = await chamar('mostrar_navegador', !S.E.visivel); renderTopo(); };
     $('#btn-mensagens').onclick = () => {
       const m = $('#mensagens'), aberto = !m.classList.contains('aberto');
@@ -1619,6 +1718,7 @@
     S.temChave = r.tem_chave;
     S.login = r.login;
     $('#versao').textContent = 'v' + r.versao;
+    S.loginTvdb = !!r.login_tvdb; S.usarTvdb = r.usar_tvdb !== false; renderLoginTvdb();
     const c = await chamar('ler_config');
     S.limite = Number(c.limite) || 350;
     renderTudo(); renderLogin();

@@ -15,7 +15,7 @@ import nucleo
 from automatizador import STORAGE
 from instrucoes import ARQUIVO_INSTRUCOES, PROMPT_PADRAO, carregar_instrucoes
 
-VERSAO = "1.3"
+VERSAO = "1.4"
 FINALIZADOS = ("Enviado", "Já preenchido")
 INCOMPLETOS = ("Sem texto", "Sem sinopse")
 ARQUIVO_HISTORICO = nucleo.PASTA / "historico_envios.json"
@@ -186,6 +186,13 @@ class Api:
             self._avisar_tela("aviso", texto=dados["texto"])
         elif tipo == "historico":
             self._registrar_historico(dados["registro"])
+        elif tipo == "tvdb":
+            e = self._por_id(dados["id"])
+            if e:
+                e["tvdb"] = dados["valor"]
+                self._avisar_tela("episodio", episodio=e)
+        elif tipo == "pedir_login_tvdb":
+            self._avisar_tela("pedir_login_tvdb")
         elif tipo == "pedir_login":
             self._avisar_tela("login", estado="expirado")
             self._avisar_tela("pedir_login")
@@ -250,7 +257,9 @@ class Api:
         config = nucleo.ler_config()
         return {"estado": self._estado(), "pendente": pendente, "versao": VERSAO,
                 "tem_chave": bool(config.get("chave_tmdb")),
-                "login": "verificando" if STORAGE.exists() else "desconectado"}
+                "login": "verificando" if STORAGE.exists() else "desconectado",
+                "login_tvdb": nucleo.STORAGE_TVDB.exists(),
+                "usar_tvdb": bool(config.get("usar_tvdb", True))}
 
     def continuar_trabalho(self):
         dados = getattr(self, "_guardado", None)
@@ -295,6 +304,47 @@ class Api:
                 self._log("A janela foi fechada antes de terminar o login.")
         return self._em_segundo_plano(rotina)
 
+    def entrar_tvdb(self):
+        def rotina():
+            self._log("Entre com sua conta na janela do TVDB. Ela fecha sozinha no final.")
+            if nucleo.fazer_login_tvdb(self._aviso_nucleo):
+                self._log("Login no TVDB feito e salvo!")
+                self._avisar_tela("aviso", texto="Login no TVDB feito com sucesso.")
+                self._avisar_tela("login_tvdb", estado="conectado")
+            else:
+                self._log("A janela do TVDB foi fechada antes de terminar o login.")
+        return self._em_segundo_plano(rotina)
+
+    def sair_tmdb(self):
+        STORAGE.unlink(missing_ok=True)
+        self._avisar_tela("login", estado="desconectado")
+        return {"ok": True}
+
+    def sair_tvdb(self):
+        nucleo.STORAGE_TVDB.unlink(missing_ok=True)
+        return {"ok": True}
+
+    def _pode_fechar(self):
+        """Pergunta antes de fechar (janela do Windows: pedir à tela nesse momento trava)."""
+        ocupado = self._ocupado
+        if not ocupado and not nucleo.ler_config().get("confirmar_fechar", True):
+            return True
+        texto = ("Um envio ou importação está em andamento. Se fechar agora, ele para aqui: o que já "
+                 "foi enviado continua no site, e o resto fica pendente na lista.\n\nParar e fechar?"
+                 if ocupado else "Seu trabalho já está salvo. Quando abrir de novo, você continua "
+                                 "de onde parou.\n\nFechar o programa?")
+        import ctypes
+        MB_YESNO, MB_ICONQUESTION, MB_TOPMOST, IDYES = 0x4, 0x20, 0x40000, 6
+        return ctypes.windll.user32.MessageBoxW(0, texto, "Sinopse Editor",
+                                                MB_YESNO | MB_ICONQUESTION | MB_TOPMOST) == IDYES
+
+    def ao_fechar(self):
+        if not self._pode_fechar():
+            return False
+        self._parar = True
+        self._salvar_trabalho()
+        return True
+
     def mostrar_navegador(self, valor):
         self.visivel = bool(valor)
         return self.visivel
@@ -314,7 +364,9 @@ class Api:
                 "revisar_envio": bool(c.get("revisar_envio", True)),
                 "analisar_idiomas": bool(c.get("analisar_idiomas", True)),
                 "pagina_serie": bool(c.get("pagina_serie", True)),
-                "atualizacoes": bool(c.get("atualizacoes", True))}
+                "atualizacoes": bool(c.get("atualizacoes", True)),
+                "usar_tvdb": bool(c.get("usar_tvdb", True)),
+                "confirmar_fechar": bool(c.get("confirmar_fechar", True))}
 
     def _com_temporada(self):
         """Opção (desligada por padrão): importar também a sinopse da temporada."""
@@ -330,8 +382,11 @@ class Api:
 
     def salvar_config(self, chave, idioma, limite, sinopse_temporada=False,
                       conferir_prefixo=True, revisar_envio=True, analisar_idiomas=True,
-                      pagina_serie=True, atualizacoes=True):
+                      pagina_serie=True, atualizacoes=True, usar_tvdb=True,
+                      confirmar_fechar=True):
         c = nucleo.ler_config()
+        c["confirmar_fechar"] = bool(confirmar_fechar)
+        c["usar_tvdb"] = bool(usar_tvdb)
         c["atualizacoes"] = bool(atualizacoes)
         c["pagina_serie"] = bool(pagina_serie)
         c["analisar_idiomas"] = bool(analisar_idiomas)
@@ -477,7 +532,7 @@ class Api:
                 self._avisar_tela("aviso", texto="Não encontrei episódios nessa temporada.")
                 return
             eps = self._com_pagina_serie(grupo["codigo"], grupo["temporada"], eps)
-            self._trocar_lista([self._novo_episodio(grupo, fonte="TMDB", **e) for e in eps])
+            self._trocar_lista([self._novo_episodio(grupo, **dict(e, fonte="TMDB")) for e in eps])
             outros = sorted({c for e in eps for c in (e.get("idioma_titulo"), e.get("idioma_sinopse"))
                              if c and not c.startswith("en")})
             self._avisar_tela("progresso", atual=1, total=1,
@@ -571,7 +626,7 @@ class Api:
                 self._avisar_tela("aviso", texto="Não encontrei a lista de episódios nessa "
                                                  "página da Wiki.")
                 return
-            self._trocar_lista([self._novo_episodio(grupo, fonte="Wiki", **e) for e in eps])
+            self._trocar_lista([self._novo_episodio(grupo, **dict(e, fonte="Wiki")) for e in eps])
             self._conferir_com_tmdb(eps, grupo["codigo"], grupo["temporada"], "Wiki")
             self._avisar_tela("progresso", atual=1, total=1,
                               texto=f"{len(eps)} episódios importados da Wiki.")
@@ -602,7 +657,9 @@ class Api:
                 self._avisar_tela("aviso", texto=f"Não encontrei episódios na temporada "
                                                  f"{temporada} desse link do TVDB.")
                 return
-            self._trocar_lista([self._novo_episodio(grupo, fonte="TVDB", **e) for e in eps])
+            self._trocar_lista([self._novo_episodio(grupo, **dict(e, fonte="TVDB", link_tvdb=link,
+                                                                   temporada_tvdb=str(temporada)))
+                                for e in eps])
             self._avisar_tela("progresso", atual=1, total=1,
                               texto=f"{len(eps)} episódios importados do TVDB.")
             self._conferir_com_tmdb(eps, grupo["codigo"], temporada, "TVDB")
@@ -764,7 +821,7 @@ class Api:
                     fonte = "TVDB" if tvdb else ("Wiki" if wiki and len(pedidas) == 1 else "TMDB")
                     if eps and temporada == pedidas[0]:
                         eps = self._com_pagina_serie(codigo, temporada, eps)
-                    novos += [self._novo_episodio(grupo, fonte=fonte, **e) for e in eps]
+                    novos += [self._novo_episodio(grupo, **dict(e, fonte=fonte)) for e in eps]
                     self._log(f"{s['nome']} · Temporada {temporada}: {len(eps)} episódios.")
             for p in problemas:
                 self._log(f"Aviso: {p}.")
@@ -1106,24 +1163,34 @@ class Api:
         return {"ok": True}
 
     # =============================================================== envio
-    def _para_enviar(self):
+    def _para_enviar(self, tvdb=False):
+        """Com `tvdb`, inclui também os já enviados ao TMDB que ainda não foram ao TVDB
+        (marcados com "so_tvdb")."""
         padrao = self._grupo_atual()
         itens, sem_codigo = [], 0
         for e in self.episodios:
             titulo = "" if nucleo.provisorio(e["titulo"]) else (nucleo.valor_valido(e["titulo"]) or "")
             sinopse = "" if nucleo.provisorio(e["sinopse"]) else (nucleo.valor_valido(e["sinopse"]) or "")
-            if not e["enviar"] or not (titulo or sinopse):
+            so_tvdb = (tvdb and not e["enviar"] and e.get("situacao") in FINALIZADOS
+                       and e.get("tvdb") not in ("Enviado", "Já preenchido")
+                       and e.get("tipo", "episodio") == "episodio")
+            if not (e["enviar"] or so_tvdb) or not (titulo or sinopse):
                 continue
             codigo = e["codigo"] or padrao["codigo"]
             if not str(codigo).isdigit():
                 sem_codigo += 1
-                continue
+                # Sem código do TMDB ainda dá para mandar ao TVDB (importado de lá).
+                if not (tvdb and e.get("tipo", "episodio") == "episodio"):
+                    continue
+                codigo, so_tvdb = "", True
             itens.append({"id": e["id"], "codigo": codigo,
                           "temporada": e["temporada"] or padrao["temporada"],
                           "numero": e["numero"], "serie": e.get("serie", ""),
                           "tipo": e.get("tipo", "episodio"),
                           "titulo": titulo, "sinopse": sinopse,
-                          "original_titulo": e.get("original_titulo", "")})
+                          "original_titulo": e.get("original_titulo", ""),
+                          "so_tvdb": so_tvdb, "link_tvdb": e.get("link_tvdb", ""),
+                          "temporada_tvdb": e.get("temporada_tvdb", "")})
         return itens, sem_codigo
 
     def preparar_envio(self):
@@ -1144,7 +1211,37 @@ class Api:
                 if i["sinopse"] and e.get("atual_sinopse"):
                     existentes["sinopse"] += 1
         revisao = self._revisar(itens) if nucleo.ler_config().get("revisar_envio", True) else []
+        series = ler_series()
+        destinos_tvdb = []
+        usar_tvdb = bool(nucleo.ler_config().get("usar_tvdb", True))
+        itens_tvdb = [i for i in self._para_enviar(tvdb=True)[0]
+                      if i.get("tipo", "episodio") == "episodio"]
+        for chave in dict.fromkeys((str(i["codigo"]), str(i["temporada"])) for i in itens_tvdb
+                                   if usar_tvdb):
+            info = series.get(chave[0], {})
+            salvo = info.get("tvdb_temporadas", {}).get(chave[1], {})
+            do_grupo = [i for i in itens_tvdb if (str(i["codigo"]), str(i["temporada"])) == chave]
+            nome = next((i["serie"] for i in do_grupo if i["serie"]),
+                        "Série " + chave[0] if chave[0] else "Série do TVDB")
+            link = info.get("tvdb", "") or next((i["link_tvdb"] for i in do_grupo if i["link_tvdb"]), "")
+            if not link and chave[0] and usar_tvdb:
+                link = nucleo.link_tvdb_pelo_tmdb(chave[0])
+                if link:
+                    gravar_serie(chave[0], nome, tvdb=link)
+            temp_tvdb = next((i["temporada_tvdb"] for i in do_grupo if i["temporada_tvdb"]), "")
+            destinos_tvdb.append({"codigo": chave[0], "temporada": chave[1], "nome": nome,
+                                  "link": link,
+                                  "temporada_tvdb": temp_tvdb or salvo.get("temporada", chave[1]),
+                                  "deslocamento": salvo.get("deslocamento", 0)})
+        config = nucleo.ler_config()
         return {"total": len(itens), "sem_codigo": sem_codigo, "idioma": self.idioma,
+                "tvdb": {"ligado": bool(config.get("enviar_tvdb", False)),
+                         "logado": nucleo.STORAGE_TVDB.exists(),
+                         "idioma_ok": self.idioma in nucleo.IDIOMA_TVDB,
+                         "total": len(itens_tvdb),
+                         "ja_enviados": sum(1 for i in itens_tvdb
+                                            if (self._por_id(i["id"]) or {}).get("situacao") in FINALIZADOS),
+                         "destinos": destinos_tvdb},
                 "revisao": revisao,
                 "grupos": [{"nome": k, "quantidade": v} for k, v in grupos.items()],
                 "existentes": existentes,
@@ -1258,9 +1355,26 @@ class Api:
             "sinopses": sum("sinopse" in h.get("depois", {}) for h in envios),
             "titulos": sum("titulo" in h.get("depois", {}) for h in envios),
             "desfeitos": sum(h.get("tipo") == "desfazer" for h in hist),
+            "tmdb": sum(h.get("site", "TMDB") == "TMDB" for h in envios),
+            "tvdb": sum(h.get("site") == "TVDB" for h in envios),
         }
 
     # ======================================================= minhas séries
+    def _poster_serie(self, codigo, nome):
+        """Pôster guardado da série; na primeira vez busca no TMDB (se houver chave)."""
+        poster = ler_series().get(codigo, {}).get("poster", "")
+        api = nucleo.tmdb_configurado()
+        if poster or not api or not codigo.isdigit():
+            return poster
+        try:
+            caminho = api._get(f"/tv/{codigo}").get("poster_path")
+        except nucleo.ErroAPI:
+            return ""
+        if not caminho:
+            return ""
+        gravar_serie(codigo, nome, poster=nucleo.POSTER + caminho)
+        return nucleo.POSTER + caminho
+
     def minhas_series(self):
         """Resumo do que já foi enviado, por série e temporada (pelo histórico)."""
         series = {}
@@ -1280,7 +1394,7 @@ class Api:
                       "ultimo": t["ultimo"]}
                      for n, t in sorted(s["temporadas"].items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0)]
             lista.append({"codigo": s["codigo"], "nome": s["nome"], "ultimo": s["ultimo"],
-                          "temporadas": temps})
+                          "temporadas": temps, "poster": self._poster_serie(s["codigo"], s["nome"])})
         return {"series": lista, "tem_chave": bool(nucleo.tmdb_configurado())}
 
     def cobertura_tmdb(self, codigo):
@@ -1363,48 +1477,83 @@ class Api:
         return {"registros": list(reversed(self._ler_historico_arquivo()))[:1000]}
 
     def desfazer(self, ids):
-        """Devolve ao TMDB o texto que havia antes dos envios escolhidos."""
-        if not STORAGE.exists():
-            return {"precisa_login": True}
+        """Devolve ao TMDB ou ao TVDB o texto que havia antes dos envios escolhidos."""
         por_id = {r["id"]: r for r in self._ler_historico_arquivo()}
         itens = []
         for n, ident in enumerate(ids):
             r = por_id.get(ident)
             if not r or not r.get("antes"):
                 continue
+            tvdb = r.get("site") == "TVDB"
+            if tvdb and not r.get("codigo_tvdb"):
+                continue
             itens.append({"id": f"desfazer-{n}", "codigo": r["codigo"], "temporada": r["temporada"],
                           "numero": r["numero"], "serie": r.get("serie", ""),
                           "titulo": r["antes"].get("titulo", ""),
                           "sinopse": r["antes"].get("sinopse", ""),
                           "campos": list(r["antes"].keys()), "forcar": True,
+                          "codigo_tvdb": r.get("codigo_tvdb", ""), "_site": "TVDB" if tvdb else "TMDB",
                           "_idioma": r.get("idioma", self.idioma)})
         if not itens:
             return {"erro": "Nada para desfazer nos itens escolhidos."}
-        idiomas = {i["_idioma"] for i in itens}
+        if any(i["_site"] == "TMDB" for i in itens) and not STORAGE.exists():
+            return {"precisa_login": True}
+        if any(i["_site"] == "TVDB" for i in itens) and not nucleo.STORAGE_TVDB.exists():
+            return {"precisa_login_tvdb": True}
+        grupos = {(i["_site"], i["_idioma"]) for i in itens}
 
         def rotina():
             feitos = falhas = 0
-            for idioma in idiomas:
-                lote = [i for i in itens if i["_idioma"] == idioma]
-                r = nucleo.enviar_episodios(lote, idioma, self.visivel, True, True,
-                                            self._aviso_nucleo, lambda: self._parar)
+            for site, idioma in sorted(grupos):
+                lote = [i for i in itens if (i["_site"], i["_idioma"]) == (site, idioma)]
+                if site == "TVDB":
+                    r = nucleo.enviar_tvdb(lote, idioma, {}, self.visivel, True, True,
+                                           self._aviso_nucleo, lambda: self._parar)
+                else:
+                    r = nucleo.enviar_episodios(lote, idioma, self.visivel, True, True,
+                                                self._aviso_nucleo, lambda: self._parar)
                 feitos, falhas = feitos + r["ok"], falhas + r["falhas"]
             self._avisar_tela("aviso", texto=f"Desfazer concluído: {feitos} restaurados"
                                              f"{f', {falhas} com problema' if falhas else ''}.")
             self._avisar_tela("historico_mudou")
         return {"ok": self._em_segundo_plano(rotina), "total": len(itens)}
 
-    def enviar(self, sub_titulo, sub_sinopse):
-        itens, _ = self._para_enviar()
-        if not itens:
+    def enviar(self, sub_titulo, sub_sinopse, tmdb=True, tvdb=None):
+        """`tvdb`: lista de destinos no TVDB (do preparar_envio, já editados) ou None."""
+        todos, _ = self._para_enviar(tvdb=bool(tvdb))
+        itens = [i for i in todos if not i["so_tvdb"]] if tmdb else []
+        if not itens and not (tvdb and todos):
             return {"erro": "Nenhum episódio marcado com título ou sinopse para enviar."}
+        if not tmdb and not tvdb:
+            return {"erro": "Escolha pelo menos um site para enviar."}
+        config = nucleo.ler_config()
+        config["enviar_tvdb"] = bool(tvdb)
+        nucleo.salvar_config(config)
+        destinos = {}
+        for d in tvdb or []:
+            destinos[(str(d["codigo"]), str(d["temporada"]))] = d
+            if d.get("link"):
+                serie = ler_series().get(str(d["codigo"]), {})
+                temporadas = serie.get("tvdb_temporadas", {})
+                temporadas[str(d["temporada"])] = {"temporada": str(d.get("temporada_tvdb") or d["temporada"]),
+                                                   "deslocamento": int(d.get("deslocamento") or 0)}
+                gravar_serie(d["codigo"], d.get("nome", ""), tvdb=d["link"], tvdb_temporadas=temporadas)
         self._salvar_trabalho()
 
         def rotina():
-            r = nucleo.enviar_episodios(itens, self.idioma, self.visivel, bool(sub_titulo),
-                                        bool(sub_sinopse), self._aviso_nucleo,
+            r = {"ok": 0, "pulados": 0, "falhas": 0}
+            if tmdb:
+                r = nucleo.enviar_episodios(itens, self.idioma, self.visivel, bool(sub_titulo),
+                                            bool(sub_sinopse), self._aviso_nucleo,
+                                            lambda: self._parar)
+                if r["ok"]:
+                    self._avisar_tela("login", estado="conectado")
+            if destinos and not self._parar:
+                rt = nucleo.enviar_tvdb(todos, self.idioma, destinos, self.visivel,
+                                        bool(sub_titulo), bool(sub_sinopse), self._aviso_nucleo,
                                         lambda: self._parar)
-            if r["ok"]:
-                self._avisar_tela("login", estado="conectado")
-            self._avisar_tela("envio_fim", **r)
+                r = dict(r, tvdb=rt)
+                if not tmdb:
+                    r.update(ok=rt["ok"], pulados=rt["pulados"], falhas=rt["falhas"])
+            self._avisar_tela("envio_fim", tmdb=bool(tmdb), **r)
         return {"ok": self._em_segundo_plano(rotina)}
