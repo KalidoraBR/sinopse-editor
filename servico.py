@@ -4,8 +4,11 @@ chamado pelo JavaScript da tela (window.pywebview.api.<método>).
 A lista de episódios mora aqui; a tela recebe avisos por `app.evento({...})`.
 """
 import json
+import os
 import re
 import threading
+import webbrowser
+from pathlib import Path
 
 import pyperclip
 import webview
@@ -15,7 +18,7 @@ import nucleo
 from automatizador import STORAGE
 from instrucoes import ARQUIVO_INSTRUCOES, PROMPT_PADRAO, carregar_instrucoes
 
-VERSAO = "1.4"
+VERSAO = "1.5"
 FINALIZADOS = ("Enviado", "Já preenchido")
 INCOMPLETOS = ("Sem texto", "Sem sinopse")
 ARQUIVO_HISTORICO = nucleo.PASTA / "historico_envios.json"
@@ -72,6 +75,7 @@ class Api:
         self._ocupado = False
         self._parar = False
         self._proximo_id = 1
+        self._historico = None
         self.visivel = False
         self.episodios = []
         self.serie = {"codigo": "", "nome": "", "ano": "", "poster": "", "temporadas": [],
@@ -115,8 +119,7 @@ class Api:
         dados = {"versao": VERSAO, "serie": self.serie, "idioma": self.idioma,
                  "episodios": self.episodios}
         try:
-            nucleo.ARQUIVO_TRABALHO.write_text(json.dumps(dados, ensure_ascii=False, indent=1),
-                                               encoding="utf-8")
+            nucleo.ARQUIVO_TRABALHO.write_text(json.dumps(dados, ensure_ascii=False), encoding="utf-8")
         except OSError:
             pass
 
@@ -132,7 +135,22 @@ class Api:
         self._proximo_id += 1
         return e
 
+    def _desmarcar_com_portugues(self, episodios):
+        """Opcional (ligado): quem já tem título e sinopse em português não vai para a tradução."""
+        if not nucleo.ler_config().get("desmarcar_portugues", True):
+            return
+        prontos = [e for e in episodios if e["enviar"] and e.get("tipo", "episodio") == "episodio"
+                   and nucleo.ja_preenchido(e.get("atual_titulo")) and (e.get("atual_sinopse") or "").strip()
+                   and e["atual_sinopse"].strip() != (e.get("original_sinopse") or "").strip()]
+        for e in prontos:
+            e["enviar"] = False
+        if prontos:
+            texto = f"{len(prontos)} episódio(s) já têm português no TMDB e vieram desmarcados."
+            self._log(texto)
+            self._avisar_tela("aviso", texto=texto)
+
     def _trocar_lista(self, episodios):
+        self._desmarcar_com_portugues(episodios)
         self.episodios = episodios
         self._publicar()
 
@@ -206,13 +224,15 @@ class Api:
 
     def _registrar_historico(self, registro):
         with self._trava:
-            historico = self._ler_historico_arquivo()
+            # Fica na memória: com milhares de envios, reler o arquivo a cada um pesava.
+            if self._historico is None:
+                self._historico = self._ler_historico_arquivo()
+            historico = self._historico
             registro["id"] = f"{registro['quando']}-{len(historico)}"
             historico.append(registro)
+            del historico[:-LIMITE_HISTORICO]
             try:
-                ARQUIVO_HISTORICO.write_text(
-                    json.dumps(historico[-LIMITE_HISTORICO:], ensure_ascii=False, indent=1),
-                    encoding="utf-8")
+                ARQUIVO_HISTORICO.write_text(json.dumps(historico, ensure_ascii=False), encoding="utf-8")
             except OSError:
                 pass
 
@@ -366,7 +386,11 @@ class Api:
                 "pagina_serie": bool(c.get("pagina_serie", True)),
                 "atualizacoes": bool(c.get("atualizacoes", True)),
                 "usar_tvdb": bool(c.get("usar_tvdb", True)),
-                "confirmar_fechar": bool(c.get("confirmar_fechar", True))}
+                "confirmar_fechar": bool(c.get("confirmar_fechar", True)),
+                "nomes_adaptados": bool(c.get("nomes_adaptados", True)),
+                "desmarcar_portugues": bool(c.get("desmarcar_portugues", True)),
+                "copiar_partes": bool(c.get("copiar_partes", True)),
+                "tamanho_parte": int(c.get("tamanho_parte", 30))}
 
     def _com_temporada(self):
         """Opção (desligada por padrão): importar também a sinopse da temporada."""
@@ -383,8 +407,15 @@ class Api:
     def salvar_config(self, chave, idioma, limite, sinopse_temporada=False,
                       conferir_prefixo=True, revisar_envio=True, analisar_idiomas=True,
                       pagina_serie=True, atualizacoes=True, usar_tvdb=True,
-                      confirmar_fechar=True):
+                      confirmar_fechar=True, copiar_partes=True, tamanho_parte=30,
+                      nomes_adaptados=True, desmarcar_portugues=True):
         c = nucleo.ler_config()
+        c["desmarcar_portugues"] = bool(desmarcar_portugues)
+        c["nomes_adaptados"] = bool(nomes_adaptados)
+        c["copiar_partes"] = bool(copiar_partes)
+        if int(tamanho_parte) != int(c.get("tamanho_parte", 30)):
+            self._limpar_partes()
+        c["tamanho_parte"] = int(tamanho_parte)
         c["confirmar_fechar"] = bool(confirmar_fechar)
         c["usar_tvdb"] = bool(usar_tvdb)
         c["atualizacoes"] = bool(atualizacoes)
@@ -483,9 +514,10 @@ class Api:
                 "serie": self.serie.get("nome", ""), "ano": self.serie.get("ano", ""),
                 "poster": poster}
 
-    def _com_pagina_serie(self, codigo, temporada, eps):
+    def _com_pagina_serie(self, codigo, temporada, eps, so_temporada=False):
         """Opcional (ligado): põe no topo da temporada o item "SÉRIE" (nome e sinopse) e a
-        sinopse da temporada. Marcados só quando a série ainda não tem português no TMDB."""
+        sinopse da temporada. Marcados só quando a série ainda não tem português no TMDB.
+        Com `so_temporada`, só a sinopse da temporada (o item "SÉRIE" já veio na primeira)."""
         if not nucleo.ler_config().get("pagina_serie", True):
             return eps
         try:
@@ -495,6 +527,8 @@ class Api:
             return eps
         if any(e.get("tipo") == "temporada" for e in eps):
             extras = [x for x in extras if x.get("tipo") != "temporada"]
+        if so_temporada:
+            return [x for x in extras if x.get("tipo") == "temporada"] + list(eps)
         if extras and not tem:
             self._log("A série ainda não tem tradução em português no TMDB: o item “SÉRIE” "
                       "veio marcado e é enviado primeiro, liberando os episódios.")
@@ -527,7 +561,8 @@ class Api:
                                                     self.idioma, com_temporada=self._com_temporada())
             else:
                 eps = nucleo.episodios_tmdb(grupo["codigo"], grupo["temporada"], self.visivel,
-                                            self._aviso_nucleo, com_temporada=self._com_temporada())
+                                            self._aviso_nucleo, com_temporada=self._com_temporada(),
+                                            destino=self.idioma)
             if not eps:
                 self._avisar_tela("aviso", texto="Não encontrei episódios nessa temporada.")
                 return
@@ -751,6 +786,24 @@ class Api:
                 return {"erro": f"Série {item['codigo']}: {erro}."}
         return {"ok": True}
 
+    def _idiomas_que_completam(self, codigo, temporada):
+        """Inglês primeiro e, se faltar texto, só os idiomas que preenchem o que falta."""
+        if not nucleo.tmdb_configurado():
+            return []
+        try:
+            r = nucleo.idiomas_temporada(codigo, temporada, self.idioma)
+        except Exception as erro:
+            self._log(f"T{temporada}: não consegui analisar os idiomas ({erro}); usei o inglês.")
+            return []
+        idiomas = sorted(r["idiomas"], key=lambda i: not i["codigo"].startswith("en"))
+        titulos, sinopses, ordem = set(), set(), []
+        for i in idiomas:
+            if set(i["titulos"]) - titulos or set(i["sinopses"]) - sinopses:
+                ordem.append(i["codigo"])
+                titulos.update(i["titulos"])
+                sinopses.update(i["sinopses"])
+        return ordem if len(ordem) > 1 else []
+
     def importar_lote(self, itens):
         def rotina():
             novos, problemas = [], []
@@ -807,9 +860,15 @@ class Api:
                         eps = nucleo.episodios_wiki(wiki, self.visivel, aviso_lote,
                                                     lambda: self._parar)
                     else:
-                        eps = nucleo.episodios_tmdb(codigo, temporada, self.visivel,
-                                                    aviso_lote,
-                                                    com_temporada=self._com_temporada())
+                        ordem = self._idiomas_que_completam(codigo, temporada) if item.get("completar") else []
+                        if ordem:
+                            eps = nucleo.episodios_tmdb_idiomas(codigo, temporada, ordem, self.idioma,
+                                                                com_temporada=self._com_temporada())
+                        else:
+                            eps = nucleo.episodios_tmdb(codigo, temporada, self.visivel,
+                                                        aviso_lote,
+                                                        com_temporada=self._com_temporada(),
+                                                        destino=self.idioma)
                     if eps and wiki:
                         esperado = next((t.get("episodios", 0) for t in s["temporadas"]
                                          if t["numero"] == temporada), 0)
@@ -819,8 +878,9 @@ class Api:
                     if not eps:
                         problemas.append(f"{s['nome']} · Temporada {temporada}: nenhum episódio")
                     fonte = "TVDB" if tvdb else ("Wiki" if wiki and len(pedidas) == 1 else "TMDB")
-                    if eps and temporada == pedidas[0]:
-                        eps = self._com_pagina_serie(codigo, temporada, eps)
+                    if eps:
+                        eps = self._com_pagina_serie(codigo, temporada, eps,
+                                                     so_temporada=temporada != pedidas[0])
                     novos += [self._novo_episodio(grupo, **dict(e, fonte=fonte)) for e in eps]
                     self._log(f"{s['nome']} · Temporada {temporada}: {len(eps)} episódios.")
             for p in problemas:
@@ -936,7 +996,7 @@ class Api:
             if e["id"] in ids:
                 e["enviar"] = bool(valor)
         self._publicar()
-        return self._estado()
+        return {"ok": True}
 
     # ================================================ localizar e substituir
     def _ocorrencias(self, busca, troca, campos, maiusculas, palavra, so_marcados):
@@ -1091,14 +1151,8 @@ class Api:
         grupos = {(e["codigo"], e["temporada"]) for e in lista}
         omitidos = [e for e in self.episodios
                     if e["id"] not in ids and (e["codigo"], e["temporada"]) in grupos]
-        salvas, glossarios = ler_series(), []
-        for codigo in dict.fromkeys(str(e["codigo"]) for e in lista):
-            linhas = [l.strip() for l in salvas.get(codigo, {}).get("glossario", "").splitlines()
-                      if l.strip()]
-            if linhas:
-                nome = next((e.get("serie") for e in lista if str(e["codigo"]) == codigo), codigo)
-                glossarios.append((nome, linhas))
-        pyperclip.copy(nucleo.texto_para_traduzir(lista, self.idioma, omitidos, glossarios))
+        self._limpar_partes()
+        pyperclip.copy(nucleo.texto_para_traduzir(lista, self.idioma, omitidos, self._glossarios(lista)))
         self._copiados = [e["id"] for e in lista]
         fora = len(self.episodios) - len(lista)
         texto = (f"{len(lista)} episódios copiados com as instruções. Cole no ChatGPT ou "
@@ -1107,26 +1161,238 @@ class Api:
             texto += f" ({fora} desmarcados ou já enviados ficaram de fora.)"
         return {"ok": True, "texto": texto}
 
+    # -------------------------------------------- copiar em partes (lotes grandes)
+    def _a_traduzir(self):
+        return [e for e in self.episodios if e["enviar"] and e["situacao"] not in FINALIZADOS]
+
+    def _glossarios(self, lista):
+        salvas, glossarios = ler_series(), []
+        for codigo in dict.fromkeys(str(e["codigo"]) for e in lista):
+            linhas = [l.strip() for l in salvas.get(codigo, {}).get("glossario", "").splitlines()
+                      if l.strip()]
+            if linhas:
+                nome = next((e.get("serie") for e in lista if str(e["codigo"]) == codigo), codigo)
+                glossarios.append((nome, linhas))
+        return glossarios
+
+    def _rotulo(self, e):
+        if e.get("tipo") == "serie":
+            return "SÉRIE"
+        return f"T{e['temporada']} " + ("TEMP" if e.get("tipo") == "temporada"
+                                        else f"E{int(e['numero']):02d}")
+
+    def _dividir(self, lista, tamanho):
+        """Sem cortar episódio. Passando da metade da parte, a virada de temporada abre outra."""
+        partes = [[]]
+        for e in lista:
+            atual = partes[-1]
+            virou = bool(atual) and (atual[-1]["codigo"], atual[-1]["temporada"]) != (e["codigo"], e["temporada"])
+            if len(atual) >= tamanho or (virou and len(atual) >= tamanho / 2):
+                partes.append([])
+            partes[-1].append(e)
+        return partes
+
+    def _partes(self):
+        numeros = sorted({e["parte"] for e in self.episodios if e.get("parte")})
+        return [[e for e in self.episodios if e.get("parte") == n] for n in numeros]
+
+    def _limpar_partes(self):
+        for e in self.episodios:
+            e.pop("parte", None)
+
+    def planejar_copia(self, tamanho=None):
+        """Divide a lista quando ela é maior que o tamanho da parte (opcional, em Configurações)."""
+        c = nucleo.ler_config()
+        if tamanho:
+            c["tamanho_parte"] = int(tamanho)
+            nucleo.salvar_config(c)
+            self._limpar_partes()
+        tam = int(c.get("tamanho_parte", 30))
+        lista = self._a_traduzir()
+        faltam = [e for e in lista if e["situacao"] not in ("Traduzido", "Editado")] or lista
+        if not lista:
+            return {"erro": "Nenhum episódio marcado para traduzir." if self.episodios
+                    else "Ainda não há episódios para copiar."}
+        if not c.get("copiar_partes", True) or (not tamanho and not self._partes() and len(faltam) <= tam):
+            return {"dividir": False}
+        if any(not e.get("parte") for e in faltam):
+            self._limpar_partes()
+            for n, parte in enumerate(self._dividir(faltam, tam), 1):
+                for e in parte:
+                    e["parte"] = n
+            self._salvar_trabalho()
+        partes = []
+        for n, parte in enumerate(self._partes(), 1):
+            marcados = [e for e in parte if e["enviar"] or e["situacao"] in FINALIZADOS]
+            prontos = [e for e in marcados if e["situacao"] in ("Traduzido", "Editado", *FINALIZADOS)]
+            partes.append({"numero": n, "total": len(marcados), "prontos": len(prontos),
+                           "de": self._rotulo(parte[0]), "ate": self._rotulo(parte[-1])})
+        return {"dividir": True, "tamanho": tam, "episodios": len(lista), "partes": partes}
+
+    def _texto_parte(self, n):
+        partes = self._partes()
+        parte = [e for e in partes[n - 1] if e["enviar"] and e["situacao"] not in FINALIZADOS]
+        base = [e for p in partes for e in p]
+        ids = {e["id"] for e in base}
+        grupos = {(e["codigo"], e["temporada"]) for e in parte}
+        fora = [e for e in self.episodios if e["id"] not in ids and (e["codigo"], e["temporada"]) in grupos]
+        return nucleo.texto_para_traduzir(parte, self.idioma, fora, self._glossarios(parte),
+                                          grupos_marca=nucleo._grupos(base), parte=(n, len(partes)))
+
+    def copiar_parte(self, numero):
+        partes = self._partes()
+        n = int(numero)
+        if not 1 <= n <= len(partes):
+            return {"erro": "Essa parte não existe mais. Abra a divisão de novo."}
+        if not any(e["enviar"] and e["situacao"] not in FINALIZADOS for e in partes[n - 1]):
+            return {"erro": f"A parte {n} já foi toda enviada."}
+        pyperclip.copy(self._texto_parte(n))
+        return {"ok": True, "texto": f"Parte {n} de {len(partes)} copiada. Cole na IA e depois "
+                                     "clique em “Colar tradução”."}
+
+    def salvar_partes(self):
+        """Um bloco de notas por parte, e a mensagem para a IA fica copiada."""
+        partes = self._partes()
+        if not partes:
+            return {"erro": "Divida a lista em partes primeiro."}
+        pasta = self._janela.create_file_dialog(webview.FOLDER_DIALOG)
+        if not pasta:
+            return {"cancelado": True}
+        pasta = Path(pasta if isinstance(pasta, str) else pasta[0])
+        nomes = []
+        for n, parte in enumerate(partes, 1):
+            if not any(e["enviar"] and e["situacao"] not in FINALIZADOS for e in parte):
+                continue
+            nome = f"Parte {n:02d} de {len(partes):02d}.txt"
+            (pasta / nome).write_text(self._texto_parte(n), encoding="utf-8-sig")
+            nomes.append(nome)
+        pyperclip.copy(f"Anexei {len(nomes)} arquivos de texto ({nomes[0]} até {nomes[-1]}). Leia um por "
+                       "vez, na ordem, com calma. Em cada arquivo há as instruções e a lista de "
+                       "episódios. Comece pelo primeiro: traduza todos os itens dele, sem resumir nem "
+                       "pular nenhum, mantendo as marcas entre colchetes, e responda aqui no chat. "
+                       "Depois pare e espere eu dizer “próximo” para seguir para o arquivo seguinte.")
+        try:
+            os.startfile(pasta)
+        except OSError:
+            pass
+        return {"ok": True, "texto": f"{len(nomes)} blocos de notas salvos. A mensagem para a IA já "
+                                     "está copiada: anexe os arquivos, cole a mensagem e envie."}
+
+    def copiar_faltando(self, ids):
+        lista = [e for e in self.episodios if e["id"] in set(ids)]
+        if not lista:
+            return {"erro": "Esses episódios não estão mais na lista."}
+        base = [e for p in self._partes() for e in p] or \
+            [e for e in self.episodios if e["id"] in set(getattr(self, "_copiados", []))] or lista
+        pyperclip.copy(nucleo.texto_para_traduzir(lista, self.idioma, None, self._glossarios(lista),
+                                                  grupos_marca=nucleo._grupos(base)))
+        return {"ok": True, "texto": f"{len(lista)} episódios que faltavam copiados. Cole na IA e "
+                                     "depois clique em “Colar tradução”."}
+
+    def _aplicar_traducao(self, texto):
+        # As marcas ([5], [T2-E5]...) dependem de quais episódios foram copiados.
+        partes = self._partes()
+        ids = getattr(self, "_copiados", None)
+        base = [e for p in partes for e in p] or ([e for e in self.episodios if e["id"] in ids] if ids else [])
+        traducoes = nucleo.ler_traducao(texto or "", base or self.episodios)
+        recebidos = set()
+        for ident, (titulo, sinopse) in traducoes.items():
+            if not (titulo or sinopse):
+                continue
+            e = self._por_id(ident)
+            if titulo:
+                e["titulo"] = titulo
+            if sinopse:
+                e["sinopse"] = sinopse
+            e["situacao"] = "Traduzido"
+            recebidos.add(ident)
+        if not recebidos:
+            return {"erro": "Não reconheci o texto copiado. Ele precisa ter as marcas dos "
+                            "episódios (ex.: [1]), Título: e Sinopse:."}
+        # Confere com o que foi pedido: a parte colada, ou tudo o que foi copiado.
+        if partes:
+            pedidos = [e for p in partes if any(e["id"] in recebidos for e in p) for e in p]
+        else:
+            pedidos = [e for e in base if e["id"] in (ids or [])]
+        pedidos = [e for e in pedidos if e["enviar"] and e["situacao"] not in FINALIZADOS]
+        faltam = [e for e in pedidos if e["id"] not in recebidos and e["situacao"] != "Traduzido"]
+        self._publicar()
+        # Nomes adaptados com fonte: no glossário, valem para as próximas partes e temporadas.
+        series = {str(self._por_id(i)["codigo"]) for i in recebidos}
+        por_nome = {(e.get("serie") or "").casefold(): str(e["codigo"]) for e in self.episodios}
+        unica = next(iter(series)) if len(series) == 1 else ""
+        salvas, nomes, vistos = ler_series(), [], set()
+        for n in nucleo.ler_nomes_adaptados(texto):
+            codigo = por_nome.get(n["serie"].casefold()) or unica
+            guardado = salvas.get(codigo, {}).get("glossario", "").casefold()
+            chave = (codigo, n["original"].casefold())
+            if codigo.isdigit() and n["original"].casefold() not in guardado and chave not in vistos:
+                vistos.add(chave)
+                serie = next(e.get("serie", "") for e in self.episodios if str(e["codigo"]) == codigo)
+                nomes.append(dict(n, codigo=codigo, serie=serie))
+        texto = f"Tradução colada em {len(recebidos)} episódios."
+        if faltam:
+            texto = f"Vieram {len(recebidos)} de {len(recebidos) + len(faltam)} episódios."
+        elif not partes:
+            texto += " Confira e envie."
+        return {"ok": True, "texto": texto, "partes": bool(partes), "recebidos": len(recebidos),
+                "faltam": [{"id": e["id"], "rotulo": self._rotulo(e)} for e in faltam],
+                "nomes": nomes}
+
+    def guardar_nomes(self, nomes):
+        for codigo in dict.fromkeys(n["codigo"] for n in nomes):
+            atual = ler_series().get(codigo, {}).get("glossario", "").strip()
+            da_serie = [n for n in nomes if n["codigo"] == codigo]
+            linhas = [f"{n['original']} = {n['adaptado']} (fonte: {n['fonte']})" for n in da_serie]
+            gravar_serie(codigo, da_serie[0]["serie"], glossario="\n".join(filter(None, [atual, *linhas])))
+        return {"ok": True, "texto": f"{len(nomes)} nome(s) guardados no glossário."}
+
+    def abrir_link(self, link):
+        if not re.match(r"https?://", link or "", re.I):
+            return {"erro": "Essa fonte não é um link."}
+        webbrowser.open(link)
+        return {"ok": True}
+
+    def _nomes_do_glossario(self, codigo):
+        """Os nomes originais que o glossário da série já troca por outro."""
+        return " | ".join(l.split("=", 1)[0].strip().casefold()
+                          for l in ler_series().get(str(codigo), {}).get("glossario", "").splitlines()
+                          if "=" in l)
+
+    def nomes_glossario(self):
+        return {c: self._nomes_do_glossario(c) for c in {str(e["codigo"]) for e in self.episodios}}
+
+    def temporadas_serie(self, codigo):
+        """Quantas temporadas (sem os especiais) e episódios a série tem, para a janela de lote."""
+        if not nucleo.tmdb_configurado():
+            return {"temporadas": 0, "episodios": 0}
+        try:
+            normais = [t for t in nucleo.info_serie(codigo, self.visivel)["temporadas"] if t["numero"]]
+        except Exception:
+            return {"temporadas": 0, "episodios": 0}
+        return {"temporadas": len(normais), "episodios": sum(t.get("episodios", 0) for t in normais)}
+
     def colar(self):
         if not self.episodios:
             return {"erro": "Importe os textos originais antes de colar a tradução."}
-        # As marcas ([5], [T2-E5]...) dependem de quais episódios foram copiados.
-        ids = getattr(self, "_copiados", None)
-        base = [e for e in self.episodios if e["id"] in ids] if ids else []
-        traducoes = nucleo.ler_traducao(pyperclip.paste() or "", base or self.episodios)
-        if not traducoes:
-            return {"erro": "Não reconheci o texto copiado. Ele precisa ter as marcas dos "
-                            "episódios (ex.: [1]), Título: e Sinopse:."}
-        for ident, (titulo, sinopse) in traducoes.items():
-            e = self._por_id(ident)
-            if titulo is not None:
-                e["titulo"] = titulo
-            if sinopse is not None:
-                e["sinopse"] = sinopse
-            e["situacao"] = "Traduzido"
-        self._publicar()
-        return {"ok": True, "texto": f"Tradução colada em {len(traducoes)} episódios. "
-                                     "Confira e envie."}
+        return self._aplicar_traducao(pyperclip.paste())
+
+    def abrir_resposta(self):
+        """Lê a resposta da IA de um ou mais arquivos de texto."""
+        if not self.episodios:
+            return {"erro": "Importe os textos originais antes de abrir a tradução."}
+        arquivos = self._janela.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True,
+                                                   file_types=("Texto (*.txt)", "Todos os arquivos (*.*)"))
+        if not arquivos:
+            return {"cancelado": True}
+        textos = []
+        for caminho in ([arquivos] if isinstance(arquivos, str) else arquivos):
+            bruto = Path(caminho).read_bytes()
+            try:
+                textos.append(bruto.decode("utf-8-sig"))
+            except UnicodeDecodeError:
+                textos.append(bruto.decode("cp1252", errors="replace"))
+        return self._aplicar_traducao("\n".join(textos))
 
     # ============================================ glossário e links salvos
     def ler_glossarios(self):
@@ -1275,9 +1541,11 @@ class Api:
             if m and e.get("tipo") != "temporada" and int(m.group(1)) != int(e["numero"]):
                 achados.append(f"o título diz {int(m.group(1))}, mas é o episódio {e['numero']}")
             if s and os_ and s != os_:
-                faltam = [n for n in _nomes_proprios(os_) if n.lower() not in s.lower()]
+                trocados = self._nomes_do_glossario(e["codigo"])
+                faltam = [n for n in _nomes_proprios(os_)
+                          if n.lower() not in s.lower() and n.casefold() not in trocados]
                 if faltam:
-                    achados.append("nome(s) que sumiram da sinopse: " + ", ".join(faltam[:4]))
+                    achados.append("nome(s) que não aparecem na sinopse (tudo bem se for o nome oficial adaptado): " + ", ".join(faltam[:4]))
             if achados:
                 avisos.append({"id": e["id"], "rotulo": rotulo, "itens": achados})
         return avisos
@@ -1517,6 +1785,33 @@ class Api:
                                              f"{f', {falhas} com problema' if falhas else ''}.")
             self._avisar_tela("historico_mudou")
         return {"ok": self._em_segundo_plano(rotina), "total": len(itens)}
+
+    def conferir_tvdb(self, destinos):
+        """Só lê o TVDB: mostra antes do envio se a temporada e os números batem."""
+        if self._ocupado:
+            return {"erro": "Espere a tarefa atual terminar."}
+        itens = [i for i in self._para_enviar(tvdb=True)[0] if i.get("tipo", "episodio") == "episodio"]
+        grupos = [dict(d, itens=[i for i in itens if (str(i["codigo"]), str(i["temporada"]))
+                                 == (str(d["codigo"]), str(d["temporada"]))]) for d in destinos]
+        try:
+            return {"ok": True, "destinos": nucleo.conferir_tvdb(grupos, self.visivel)}
+        except Exception as erro:
+            return {"erro": f"Não consegui conferir no TVDB: {erro}"}
+
+    def abrir_no_tvdb(self, ident):
+        """Abre no navegador a temporada do episódio no TVDB."""
+        e = self._por_id(ident)
+        if not e:
+            return {"erro": "Episódio não encontrado."}
+        info = ler_series().get(str(e["codigo"]), {})
+        link = info.get("tvdb") or e.get("link_tvdb") or \
+            (nucleo.link_tvdb_pelo_tmdb(e["codigo"]) if str(e["codigo"]).isdigit() else "")
+        slug = nucleo.slug_tvdb(link)
+        if not slug:
+            return {"erro": "Ainda não sei o link desta série no TVDB. Coloque na janela de envio."}
+        temporada = e.get("temporada_tvdb") or info.get("tvdb_temporadas", {}).get(str(e["temporada"]), {}).get("temporada") or e["temporada"]
+        webbrowser.open(f"https://thetvdb.com/series/{slug}/seasons/official/{temporada}")
+        return {"ok": True}
 
     def enviar(self, sub_titulo, sub_sinopse, tmdb=True, tvdb=None):
         """`tvdb`: lista de destinos no TVDB (do preparar_envio, já editados) ou None."""

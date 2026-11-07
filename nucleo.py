@@ -5,6 +5,7 @@ Funções longas recebem `avisar(tipo, **dados)` para contar o progresso e
 `deve_parar()` para saber se o usuário clicou em Parar.
 """
 import csv
+import difflib
 import json
 import re
 import time
@@ -17,7 +18,7 @@ from playwright.sync_api import sync_playwright
 from automatizador import AppTMDB, PASTA, STORAGE
 from extrator import AppColetorWiki, ENDERECO_CDP, esperar_verificacao
 import wiki_api
-from instrucoes import MARCA_EPISODIOS, carregar_instrucoes
+from instrucoes import MARCA_EPISODIOS, aplicar_regra_nomes, carregar_instrucoes
 
 ARQUIVO_TRABALHO = PASTA / "trabalho_em_andamento.json"
 ARQUIVO_CONFIG = PASTA / "config.json"
@@ -200,7 +201,9 @@ def salvar_config(config):
 def abrir_navegador(visivel, login=None):
     """Abre o Chrome (oculto ou visível) e entrega uma aba pronta para uso."""
     with sync_playwright() as p:
-        navegador = p.chromium.launch(channel="chrome", headless=not visivel)
+        # Oculto, o Chrome não baixa imagens: os sites pesam menos e a janela não engasga.
+        navegador = p.chromium.launch(channel="chrome", headless=not visivel,
+                                      args=[] if visivel else ["--blink-settings=imagesEnabled=false"])
         versao = navegador.version.split(".")[0]
         contexto = navegador.new_context(
             storage_state=str(login) if login else None,
@@ -442,13 +445,13 @@ def info_serie(codigo, visivel, pagina=None):
         return buscar_info_serie_site(nova, codigo)
 
 
-def episodios_tmdb(codigo, temporada, visivel, avisar, pagina=None, com_temporada=False):
-    """Textos em inglês de uma temporada; com a API, também o que já existe em pt-BR."""
+def episodios_tmdb(codigo, temporada, visivel, avisar, pagina=None, com_temporada=False, destino="pt-BR"):
+    """Textos em inglês de uma temporada; com a API, também o que já existe em `destino`."""
     api = tmdb_configurado()
     if api:
         originais = api.temporada(codigo, temporada, "en-US")
         try:
-            atuais = {e["numero"]: e for e in api.temporada(codigo, temporada, "pt-BR")}
+            atuais = {e["numero"]: e for e in api.temporada(codigo, temporada, destino)}
         except ErroAPI:
             atuais = {}
         saida = []
@@ -910,7 +913,10 @@ def _aviso_plot(episodios, grupos):
             "sem revelar o final nem reviravoltas. Mantenha os nomes próprios.")
 
 
-def texto_para_traduzir(episodios, idioma, omitidos=None, glossarios=None):
+def texto_para_traduzir(episodios, idioma, omitidos=None, glossarios=None, grupos_marca=None,
+                        parte=None):
+    """`grupos_marca`: temporadas da lista inteira, para as marcas valerem em todas as partes.
+    `parte`: (número, total) quando este texto é só um pedaço da lista."""
     grupos = _grupos(episodios)
     trocas = {"{idioma}": NOMES_IDIOMA.get(idioma, idioma)}
     if len(grupos) == 1:
@@ -932,7 +938,7 @@ def texto_para_traduzir(episodios, idioma, omitidos=None, glossarios=None):
         lote = "\n\nSÉRIES NESTE LOTE (pesquise cada uma):\n" + "\n".join(
             f"- “{nome}”{f' ({ano})' if ano else ''}: temporada(s) {', '.join(temps)}"
             for (nome, ano), temps in por_serie.items())
-    texto = carregar_instrucoes()
+    texto = aplicar_regra_nomes(carregar_instrucoes(), ler_config().get("nomes_adaptados", True))
     for chave, valor in trocas.items():
         texto = texto.replace(chave, valor)
     if any(e.get("tipo") == "serie" for e in episodios):
@@ -954,6 +960,14 @@ def texto_para_traduzir(episodios, idioma, omitidos=None, glossarios=None):
                   "sua pesquisa)")
         for nome, linhas in glossarios:
             texto += f"\n“{nome}”:\n" + "\n".join(f"- {l}" for l in linhas)
+    if "NOMES ADAPTADOS:" in texto and len({c for c, _ in grupos}) > 1:
+        texto += ("\n\nNOMES EM LOTE\nComo aqui há mais de uma série, em “NOMES ADAPTADOS” acrescente "
+                  "no fim de cada linha o nome da série, assim: Nome original = Nome adaptado | link "
+                  "da fonte | Nome da série")
+    if parte:
+        texto += (f"\n\nPARTE {parte[0]} DE {parte[1]}\nEste é um pedaço de uma lista maior. Traduza "
+                  f"todos os {len(episodios)} itens abaixo, sem resumir nem pular nenhum, e mantenha "
+                  "as marcas entre colchetes exatamente como estão.")
     texto += lote + _aviso_plot(episodios, grupos) + _aviso_omitidos(omitidos) + f"\n\n{MARCA_EPISODIOS}\n"
     anterior = None
     for e in episodios:
@@ -961,9 +975,24 @@ def texto_para_traduzir(episodios, idioma, omitidos=None, glossarios=None):
         if len(grupos) > 1 and grupo != anterior:
             texto += f"\n=== {nome_grupo(e)} ===\n"
             anterior = grupo
-        texto += (f"\n{marca(e, grupos)}\nTítulo: {e.get('titulo') or ''}\n"
+        texto += (f"\n{marca(e, grupos_marca or grupos)}\nTítulo: {e.get('titulo') or ''}\n"
                   f"Sinopse: {e.get('sinopse') or ''}\n")
     return texto
+
+
+def ler_nomes_adaptados(texto):
+    """Lê a lista "Original = Adaptado | fonte" da resposta da IA. Sem fonte, a linha não vale."""
+    achado = re.search(r"NOMES ADAPTADOS:(.*?)FIM DOS NOMES", texto or "", re.S | re.I)
+    nomes = []
+    for linha in (achado.group(1).splitlines() if achado else []):
+        partes = re.match(r"\s*[-*]?\s*(.+?)\s*=\s*(.+?)\s*\|\s*([^|]*\S)\s*(?:\|\s*(.*\S)\s*)?$",
+                          linha.replace("**", ""))
+        if partes and partes.group(1).casefold() != partes.group(2).casefold():
+            link = re.search(r"https?://[^\s)\]>]+", partes.group(3))
+            nomes.append({"original": partes.group(1), "adaptado": partes.group(2),
+                          "fonte": link.group(0) if link else partes.group(3),
+                          "serie": re.sub(r"\s*\(\d{4}\)\s*$", "", partes.group(4) or "")})
+    return nomes
 
 
 def ler_traducao(texto, episodios):
@@ -1249,6 +1278,74 @@ def _episodios_da_temporada_tvdb(pagina, slug, temporada, avisar):
         if n and ident:
             mapa.setdefault(int(n.group(1)), ident.group(1))
     return mapa
+
+
+def _titulo_comparavel(titulo):
+    return re.sub(r"[^a-z0-9]+", " ", (titulo or "").casefold()).strip()
+
+
+def _titulos_batem(a, b):
+    a, b = _titulo_comparavel(a), _titulo_comparavel(b)
+    return bool(a and b) and (a == b or difflib.SequenceMatcher(None, a, b).ratio() >= 0.75)
+
+
+def _conferir_destino(pagina, destino):
+    """Compara os títulos de uma temporada com a página pública do TVDB (só leitura)."""
+    deslocamento = int(destino.get("deslocamento") or 0)
+    temporada = str(destino.get("temporada_tvdb") or destino.get("temporada"))
+    slug = slug_tvdb(destino.get("link", ""))
+    r = {"codigo": destino.get("codigo", ""), "temporada": destino.get("temporada", ""),
+         "temporada_tvdb": temporada, "deslocamento": deslocamento, "nome_tvdb": "", "total_tvdb": 0,
+         "total": len(destino["itens"]), "batem": 0, "comparados": 0, "faltam": [], "diferentes": [],
+         "sugestao": None}
+    if not slug:
+        return dict(r, erro="sem link da série no TVDB")
+    _abrir_tvdb(pagina, f"https://thetvdb.com/series/{slug}/seasons/official/{temporada}",
+                "table tbody tr")
+    r["nome_tvdb"] = re.sub(r"\s*-\s*TheTVDB\.com\s*$", "", pagina.title() or "", flags=re.I)
+    linhas = pagina.evaluate(r"""() => [...document.querySelectorAll('table tbody tr')]
+        .map((tr) => [...tr.children].slice(0, 2).map((td) => td.innerText.trim()))""")
+    titulos = {}
+    for linha in linhas:
+        n = re.search(r"E(\d+)", linha[0] if linha else "", re.I)
+        if n and len(linha) > 1:
+            titulos.setdefault(int(n.group(1)), linha[1])
+    r["total_tvdb"] = len(titulos)
+
+    def acertos(soma):
+        return sum(_titulos_batem(i["original_titulo"], titulos.get(int(i["numero"]) + soma))
+                   for i in destino["itens"])
+    for item in destino["itens"]:
+        numero = int(item["numero"]) + deslocamento
+        if numero not in titulos:
+            r["faltam"].append(numero)
+        elif item["original_titulo"].strip():
+            r["comparados"] += 1
+            if _titulos_batem(item["original_titulo"], titulos[numero]):
+                r["batem"] += 1
+            else:
+                r["diferentes"].append({"numero": item["numero"], "aqui": item["original_titulo"],
+                                        "tvdb": titulos[numero], "numero_tvdb": numero})
+    # Quando a numeração está deslocada, outra soma faz muito mais títulos baterem.
+    if titulos and r["comparados"] and r["batem"] < r["comparados"]:
+        melhor = max(range(-max(titulos), max(titulos) + 1), key=acertos)
+        if melhor != deslocamento and acertos(melhor) >= max(2, r["batem"] + 2):
+            r["sugestao"] = {"deslocamento": melhor, "batem": acertos(melhor)}
+    return r
+
+
+def conferir_tvdb(destinos, visivel=False):
+    """Antes de enviar: a temporada do TVDB é a certa? Os números e títulos batem?"""
+    resultados = []
+    with abrir_navegador(visivel) as pagina:
+        for destino in destinos:
+            try:
+                resultados.append(_conferir_destino(pagina, destino))
+            except (ErroAPI, InstavelTVDB) as erro:
+                resultados.append({"codigo": destino.get("codigo", ""),
+                                   "temporada": destino.get("temporada", ""), "erro": str(erro)})
+            _pausa_tvdb(pagina)
+    return resultados
 
 
 def enviar_tvdb(itens, idioma, destinos, visivel, sub_titulo, sub_sinopse, avisar, deve_parar):

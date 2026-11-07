@@ -12,7 +12,7 @@
   const S = {
     aba: 'traducao',
     E: { episodios: [], serie: {}, idioma: 'pt-BR', ocupado: false, visivel: false },
-    filtro: 'pendentes', sel: null, login: 'verificando', temChave: false, limite: 350,
+    filtro: 'pendentes', sel: null, recolhidos: new Set(), login: 'verificando', temChave: false, limite: 350,
     sub: { t: false, s: false }, log: [],
   };
 
@@ -88,6 +88,10 @@
     const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     S.log.push(`[${hora}] ${texto}`);
     if (S.log.length > 600) S.log.shift();
+    if ($('#mensagens').classList.contains('aberto')) mostrarLog();
+  }
+
+  function mostrarLog() {
     const pre = $('#log');
     pre.textContent = S.log.join('\n');
     pre.scrollTop = pre.scrollHeight;
@@ -174,7 +178,18 @@
 
   async function podeSubstituirLista() {
     if (!S.E.episodios.length) return true;
-    return confirmar('Substituir a lista?', 'Os episódios que estão na lista agora serão trocados pelos novos.', 'Substituir');
+    return new Promise((ok) => {
+      const { fundo } = modal({ titulo: 'Substituir a lista?', texto: 'Os episódios que estão na lista agora serão trocados pelos novos.', botoes: [
+        { txt: 'Cancelar', acao: () => ok(false) },
+        { txt: 'Salvar com nome antes', acao: async () => {
+          const r = await chamar('salvar_trabalho_como', (grupos(S.E.episodios).size > 1 ? 'Lote ' : '') + (S.E.episodios[0].serie || 'Trabalho'));
+          resultado(r);
+          ok(!!r.ok);
+        } },
+        { txt: 'Substituir', cls: 'btn-pri', acao: () => ok(true) },
+      ] });
+      $('.modal', fundo).style.maxWidth = '600px';
+    });
   }
 
   // ==================================================================== topo
@@ -186,8 +201,8 @@
     let img = '';
     if (g.size > 1) {
       const nomes = [...new Set(eps.map((e) => e.serie || 'Série ' + e.codigo))];
-      titulo.textContent = `Lote · ${g.size} temporadas`;
-      sub.textContent = nomes.slice(0, 3).join(', ') + (nomes.length > 3 ? ` e mais ${nomes.length - 3}` : '');
+      titulo.textContent = nomes.length === 1 ? nomes[0] : `Lote · ${nomes.length} séries`;
+      sub.textContent = `${g.size} temporadas · ${eps.length} episódios`;
       img = eps.find((e) => e.poster)?.poster || '';
     } else if (serie.nome) {
       titulo.textContent = serie.nome;
@@ -205,13 +220,14 @@
 
     const chips = [];
         const temps = (serie.temporadas || []).map((t) => String(t.numero));
-    if (temps.length) {
+    // Com várias temporadas na lista, escolher "uma" aqui só confundiria.
+    if (temps.length && g.size <= 1) {
       chips.push(`<label class="oculto-leitor" for="sel-temporada">Temporada</label>
         <select class="chip" id="sel-temporada">${temps.map((n) => `<option value="${n}" ${String(serie.temporada) === n ? 'selected' : ''}>${n === '0' ? 'Especiais' : 'Temporada ' + n}</option>`).join('')}</select>`);
     }
     chips.push(`<label class="oculto-leitor" for="sel-idioma">Idioma de destino</label>
       <select class="chip" id="sel-idioma">${['pt-BR', 'pt-PT'].map((i) => `<option value="${i}" ${S.E.idioma === i ? 'selected' : ''}>${i === 'pt-BR' ? 'Português (Brasil)' : 'Português (Portugal)'}</option>`).join('')}</select>`);
-    if (S.E.episodios.length) chips.push('<button class="chip-link" id="btn-trocar">Trocar série</button><span class="salvo-auto" title="O trabalho é guardado sozinho a cada mudança">✓ Salvo automaticamente</span>');
+    if (serie.codigo || S.E.episodios.length) chips.push('<button class="chip-link" id="btn-trocar">Trocar série</button><span class="salvo-auto" title="O trabalho é guardado sozinho a cada mudança">✓ Salvo automaticamente</span>');
     $('#chips').innerHTML = chips.join('');
     $('#btn-trocar')?.addEventListener('click', () => { const v = document.body.classList.toggle('trocando'); if (v) $('#busca').focus(); });
     $('#sel-temporada')?.addEventListener('change', (ev) => { S.E.serie.temporada = ev.target.value; chamar('definir', 'temporada', ev.target.value); });
@@ -242,17 +258,13 @@
   }
 
   // =================================================================== lista
-  function renderLista() {
-    const eps = S.E.episodios;
-    document.body.classList.toggle('sem-lista', !eps.length);
-    $('.busca-casa').appendChild($('.busca'));
+  // Filtros e botões da lista, sem redesenhar os episódios.
+  function renderContagens() {
+    const eps = S.E.episodios, g = grupos(eps);
     const contagem = { pendentes: eps.filter((e) => !finalizado(e)).length, todos: eps.length,
       problema: eps.filter((e) => e.situacao === 'Falhou' || problemaTvdb(e)).length, enviados: eps.filter(finalizado).length };
     const nomesF = { pendentes: 'Pendentes', todos: 'Todos', problema: 'Com problema', enviados: 'Enviados' };
     $$('#filtros button').forEach((b) => { b.textContent = `${nomesF[b.dataset.f]} ${contagem[b.dataset.f]}`; });
-    const vis = visiveis();
-    const feitos = eps.filter(finalizado).length;
-    const g = grupos(eps);
     $('#total').textContent = eps.length ? `${eps.length} episódios${g.size > 1 ? ` em ${g.size} temporadas` : ''}` : 'Nenhum episódio';
     const cont = {};
     eps.forEach((e) => { cont[e.situacao] = (cont[e.situacao] || 0) + 1; });
@@ -266,16 +278,33 @@
     const comp = $('#btn-complementar');
     comp.hidden = !incompletos;
     $('span', comp).textContent = `Complementar (${incompletos})`;
-    const falhas = eps.filter((e) => e.situacao === 'Falhou').length;
+    const recolher = $('#btn-recolher-todas'), chaves = [...g.keys()], todasFechadas = chaves.every((k) => S.recolhidos.has(k));
+    recolher.hidden = g.size < 2;
+    recolher.classList.toggle('virada', !todasFechadas);
+    $('span', recolher).textContent = todasFechadas ? 'Abrir todas' : 'Recolher todas';
+    const falhas = eps.filter((e) => e.situacao === 'Falhou' || problemaTvdb(e)).length;
     const rep = $('#btn-repetir');
     rep.hidden = !falhas;
     $('span', rep).textContent = `Tentar de novo (${falhas})`;
 
+  }
+
+  function renderLista() {
+    const eps = S.E.episodios;
+    const escolhida = !eps.length && !!(S.E.serie && S.E.serie.codigo);
+    document.body.classList.toggle('sem-lista', !eps.length && !escolhida);
+    document.body.classList.toggle('serie-vazia', escolhida);
+    $('.busca-casa').appendChild($('.busca'));
+    renderContagens();
+    const vis = visiveis();
+    const feitos = eps.filter(finalizado).length;
+    const g = grupos(eps);
     const rol = $('#rolagem');
     if (!eps.length) {
       rol.innerHTML = `<div class="inicio">
-        <h1>Qual série você vai traduzir?</h1>
-        <div id="hero-busca"></div>
+        <h1>${escolhida ? 'O que você quer importar?' : 'Qual série você vai traduzir?'}</h1>
+        ${escolhida ? `<div class="importar-opcoes"><button class="btn-pri importar-grande" id="hero-tmdb">${ic('filme')} Importar a temporada ${esc(S.E.serie.temporada || '1')} do TMDB</button>
+          ${(S.E.serie.temporadas || []).length > 1 ? `<button class="btn-sec importar-grande" id="hero-todas">${ic('camadas')} Importar várias ou todas (${S.E.serie.temporadas.length})</button>` : ''}</div>` : '<div id="hero-busca"></div>'}
         <span class="inicio-ou">Ou comece por outra fonte:</span>
         <div class="fontes">
           <button class="fonte" data-clicar="imp-wiki">${ic('globo')}<b>Wiki (Fandom)</b><span>Quando o TMDB não tem sinopse</span></button>
@@ -284,7 +313,8 @@
           <div class="fonte verde" role="button" tabindex="0" data-clicar="imp-planilha">${ic('tabela')}<b>Planilha</b><span>Abrir um arquivo CSV</span><a href="#" data-modelo>Baixar modelo vazio</a></div>
         </div>
         <div class="inicio-recentes" id="inicio-recentes"></div></div>`;
-      $('#hero-busca', rol).appendChild($('.busca'));
+      if (escolhida) { $('#hero-tmdb', rol).onclick = () => $('#imp-tmdb').click(); const t = $('#hero-todas', rol); if (t) t.onclick = importarTemporadas; }
+      else $('#hero-busca', rol).appendChild($('.busca'));
       $$('[data-clicar]', rol).forEach((c) => c.onclick = () => $('#' + c.dataset.clicar).click());
       $('[data-modelo]', rol).onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); $('#btn-modelo').click(); };
       preencherInicio();
@@ -328,19 +358,21 @@
           const todosMarc = marcGrupo.length > 0 && marcGrupo.every((e) => e.enviar);
           const algunsMarc = !todosMarc && marcGrupo.some((e) => e.enviar);
           const fontes = [...new Set(todosDoGrupo.map((e) => e.fonte).filter(Boolean))];
-          html += `<div class="grupo-cab">
+          const fechado = S.recolhidos.has(grupoDe(primeiro));
+          html += `<div class="grupo-cab ${fechado ? 'fechado' : ''}" data-chave="${esc(grupoDe(primeiro))}">
             <label class="marca-grupo" title="Marcar ou desmarcar todos os episódios desta temporada"><input type="checkbox" data-grupo="${esc(grupoDe(primeiro))}"
               ${todosMarc ? 'checked' : ''} ${algunsMarc ? 'data-meio="1"' : ''} ${marcGrupo.length ? '' : 'disabled'}
               aria-label="Marcar todos de ${esc(nomeGrupo(primeiro))}"></label>
-            ${primeiro.poster ? `<img class="poster p" src="${esc(primeiro.poster)}" alt="">` : `<div class="poster p" aria-hidden="true"></div>`}
+            ${primeiro.poster ? `<img class="poster p" src="${esc(primeiro.poster)}" alt="" loading="lazy" decoding="async">` : `<div class="poster p" aria-hidden="true"></div>`}
             <div class="grupo-info">
               <div class="grupo-linha"><b>${esc(nomeGrupo(primeiro))}</b>${fontes.map((f) => `<span class="fonte-tag fonte-${esc(f.toLowerCase())}" title="Textos originais vindos de: ${esc(f)}">via ${esc(f)}</span>`).join('')}</div>
               <div class="grupo-linha"><div class="barrinha" aria-label="${pct}% enviado"><div style="width:${pct}%"></div></div>
-                <span><b>${enviados} de ${todosDoGrupo.length}</b> enviados</span></div>
+                <span class="grupo-prog"><b>${enviados} de ${todosDoGrupo.length}</b> enviados</span></div>
             </div>
+            <span class="seta-grupo" aria-hidden="true">${ic('seta')}</span>
             <button class="btn-mini tirar-grupo" data-tirar-grupo="${esc(grupoDe(primeiro))}" title="Tirar esta temporada da lista (nada muda no TMDB)" aria-label="Tirar ${esc(nomeGrupo(primeiro))} da lista">${ic('lixo')}</button></div>`;
         }
-        lista.forEach((e) => { html += linhaHtml(e); });
+        if (!S.recolhidos.has(grupoDe(primeiro))) lista.forEach((e) => { html += linhaHtml(e); });
       }
       rol.innerHTML = html;
       $$('input[data-meio]', rol).forEach((c) => { c.indeterminate = true; });
@@ -359,8 +391,9 @@
     if (e.sinopse_do_plot && !['Traduzido', 'Editado', 'Enviado', 'Já preenchido'].includes(e.situacao)) {
       etiqueta += ' <span class="idi-tag plot" title="A Wiki não tinha sinopse: veio o enredo completo (Plot). A IA vai resumir ao traduzir.">PLOT</span>';
     }
+    const motivos = { 'Não encontrado': 'não achou', 'Sem link': 'sem link', 'Travado': 'travado' };
     const site = (nome, valor) => { const bom = valor === 'Enviado' || valor === 'Já preenchido';
-      return `<span class="selo ${bom ? 'selo-ok' : 'selo-falha'}" title="${nome}: ${esc(valor)}">${nome} ${bom ? '✓' : 'falhou'}</span>`; };
+      return `<span class="selo ${bom ? 'selo-ok' : 'selo-falha'}" title="${nome}: ${esc(valor)}">${nome} ${bom ? '✓' : motivos[valor] || 'falhou'}</span>`; };
     const selos = (finalizado(e) ? site('TMDB', e.situacao) : `<span class="selo ${classeSelo(e.situacao)}">${esc(e.situacao)}</span>`) + (e.tvdb ? site('TVDB', e.tvdb) : '');
     const cls = tam > S.limite ? 'excesso' : tam > S.limite * 0.8 ? 'alerta' : '';
     return `<div class="ep ${S.sel === e.id ? 'sel' : ''} ${finalizado(e) ? 'feito' : ''}" data-id="${e.id}">
@@ -370,6 +403,17 @@
       <span class="tam ${cls}"><span class="ind ${e.tipo === 'temporada' ? 'oculto' : (e.titulo || '').trim() ? 'tem' : 'falta'}" title="${(e.titulo || '').trim() ? 'Tem título' : 'Sem título'}">T</span><span class="ind ${tam ? 'tem' : 'falta'}" title="${tam ? 'Tem sinopse' : 'Sem sinopse'}">S</span>${tam}</span>
       <span class="selos">${selos}</span>
       <button class="tirar-ep" data-tirar="${e.id}" title="Tirar este episódio da lista" aria-label="Tirar o episódio ${e.numero} da lista">${ic('lixo')}</button></div>`;
+  }
+
+  // Episódio enviado: atualiza só a temporada dele, sem redesenhar a lista toda.
+  function atualizarGrupo(e) {
+    const cab = $$('.grupo-cab').find((c) => c.dataset.chave === grupoDe(e));
+    if (!cab) return;
+    const doGrupo = S.E.episodios.filter((x) => grupoDe(x) === grupoDe(e));
+    const feitos = doGrupo.filter(finalizado).length, pct = Math.round((feitos / doGrupo.length) * 100);
+    $('.grupo-prog', cab).innerHTML = `<b>${feitos} de ${doGrupo.length}</b> enviados`;
+    $('.barrinha', cab).setAttribute('aria-label', `${pct}% enviado`);
+    $('.barrinha div', cab).style.width = `${pct}%`;
   }
 
   function atualizarLinha(e) {
@@ -440,6 +484,7 @@
         ${temRefPt(e) ? `<div class="caixa-info" style="border-color:#2C4A5A"><span class="rot">NO TVDB EM PORTUGUÊS (${esc(S.E.idioma.toUpperCase())}) <button class="btn-mini" id="usar-pt" style="height:26px">Usar este texto</button></span>
           ${refPt(e).titulo && e.tipo !== 'temporada' ? `<b>${esc(refPt(e).titulo)}</b>` : ''}<span>${esc(refPt(e).sinopse) || 'Sem sinopse em português.'}</span></div>` : ''}
         ${tmdbHoje}
+        ${S.usarTvdb && (e.tipo || 'episodio') === 'episodio' ? `<div class="caixa-info"><span class="rot">NO TVDB <button class="btn-mini" id="ver-tvdb" style="height:26px">Abrir a temporada</button></span><span>${e.tvdb ? esc(e.tvdb) : 'Ainda não enviado por este programa.'}</span></div>` : ''}
         </div>
       </div>
       <div class="insp-rodape"><button id="ep-ant">← Anterior</button><button id="ep-prox">Próximo →</button>
@@ -471,6 +516,7 @@
     $('#ed-original').onclick = () => editarOriginal(e);
     $('#insp-fechar').onclick = () => box.classList.remove('aberto');
     $('#usar-pt')?.addEventListener('click', async () => resultado(await chamar('usar_portugues_tvdb', [e.id])));
+    $('#ver-tvdb')?.addEventListener('click', async () => resultado(await chamar('abrir_no_tvdb', e.id)));
     $('#ed-sinopse').addEventListener('input', (ev) => salvar('sinopse', ev.target.value));
     const lista = visiveis();
     const i = lista.findIndex((x) => x.id === e.id);
@@ -514,9 +560,10 @@
     const trad = ($('#ed-sinopse')?.value || '').toLowerCase();
     const nomes = nomesProprios(e.original_sinopse);
     if (!nomes.length || !trad.trim() || trad === (e.original_sinopse || '').toLowerCase()) { caixa.textContent = ''; return; }
-    const faltam = nomes.filter((n) => !trad.includes(n.toLowerCase()));
+    const trocados = (S.glossarios || {})[String(e.codigo)] || '';
+    const faltam = nomes.filter((n) => !trad.includes(n.toLowerCase()) && !trocados.includes(n.toLowerCase()));
     caixa.className = 'nomes-check ' + (faltam.length ? 'falta' : 'ok');
-    caixa.textContent = faltam.length ? `⚠ Sumiram da tradução: ${faltam.join(', ')}` : `✓ Nomes próprios mantidos: ${nomes.join(', ')}`;
+    caixa.textContent = faltam.length ? `⚠ Não aparecem na tradução: ${faltam.join(', ')}. Tudo bem se for o nome oficial adaptado.` : `✓ Nomes próprios mantidos: ${nomes.join(', ')}`;
   }
 
   function idiomaOriginal(e) {
@@ -552,6 +599,7 @@
     if (id == null) return;
     const e = porId(id);
     S.sel = e ? e.id : id;
+    if (e && S.recolhidos.delete(grupoDe(e))) renderLista();
     $('#inspetor').classList.add('aberto');
     $$('.ep.sel').forEach((el) => el.classList.remove('sel'));
     const el = $(`.ep[data-id="${id}"]`);
@@ -618,6 +666,18 @@
     }).join('');
   }
 
+  let desenhoMarcado = false, codigosVistos = '';
+  function desenharLogo() {
+    if (desenhoMarcado) return;
+    desenhoMarcado = true;
+    requestAnimationFrame(() => {
+      desenhoMarcado = false;
+      renderTudo();
+      const codigos = [...new Set(S.E.episodios.map((e) => e.codigo))].join();
+      if (codigos !== codigosVistos) { codigosVistos = codigos; atualizarGlossarios(); }
+    });
+  }
+
   function renderTudo() {
     if (S.sel != null && !porId(S.sel)) S.sel = null;
     renderTopo(); renderEtapas(); renderLista(); renderInspetor(); renderRodape();
@@ -627,7 +687,7 @@
   window.app = {
     evento(ev) {
       switch (ev.tipo) {
-        case 'estado': S.E = ev.estado; renderTudo(); break;
+        case 'estado': S.E = ev.estado; desenharLogo(); break;
         case 'episodio': {
           const e = porId(ev.episodio.id);
           if (!e) break;
@@ -642,7 +702,15 @@
               novo.classList.remove('feito');
               novo.style.background = '#14281D';
               setTimeout(() => novo.classList.add('saindo'), 450);
-              setTimeout(() => { if (S.sel === e.id) S.sel = null; renderLista(); renderInspetor(); }, 900);
+              setTimeout(() => {
+                const eraSel = S.sel === e.id;
+                if (eraSel) S.sel = null;
+                // A lista só é refeita quando a temporada ou o filtro ficam vazios.
+                const grupoVazio = !visiveis().some((x) => grupoDe(x) === grupoDe(e));
+                if (grupoVazio) renderLista();
+                else { novo.remove(); renderContagens(); atualizarGrupo(e); }
+                if (eraSel) renderInspetor();
+              }, 750);
             }
           } else {
             atualizarLinha(e);
@@ -690,8 +758,9 @@
           notificar(ev.falhas ? 'Envio terminado com avisos' : 'Envio concluído', partes.join(' · '), ev.falhas ? 'alerta' : 'ok', 9000);
           // Tira do painel o episódio que já foi enviado e some da lista de pendentes.
           // Recomeça limpo: volta para "Pendentes" e tira do painel o episódio antigo.
-          S.filtro = 'pendentes';
-          $$('#filtros button').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.f === 'pendentes')));
+          // Se algo deu problema em algum site, a lista já abre mostrando o que foi.
+          S.filtro = ev.falhas || ev.tvdb?.falhas ? 'problema' : 'pendentes';
+          $$('#filtros button').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.f === S.filtro)));
           S.sel = null;
           $('#inspetor').classList.remove('aberto');
           renderTudo();
@@ -717,6 +786,99 @@
     if (r.sem_chave) { resultado(await chamar('importar_tmdb')); return; }
     if (r.erro) { resultado(r); return; }
     escolherIdiomas(r);
+  }
+
+  // Importar a série inteira (ou as temporadas escolhidas) de uma vez só.
+  async function importarTemporadas() {
+    const s = S.E.serie;
+    if (!s?.codigo) { aviso('Escolha a série primeiro: busque pelo nome ou código no topo.'); $('#busca').focus(); return; }
+    const temps = [...(s.temporadas || [])].sort((a, b) => (a.numero === 0) - (b.numero === 0) || a.numero - b.numero);
+    if (!temps.length) { aviso('Não encontrei as temporadas desta série.'); return; }
+    const c = await chamar('ler_config');
+    const { fundo } = modal({ icone: 'camadas', titulo: `Importar temporadas de ${esc(s.nome)}`,
+      texto: 'Os Especiais vêm desmarcados. A lista fica separada por temporada, e cada uma pode ser recolhida.',
+      corpo: `<div class="linha-flex"><button class="btn-azul pequeno" id="temp-todas">Marcar todas</button><button class="btn-azul pequeno" id="temp-nenhuma">Desmarcar todas</button></div>
+        <div class="temporadas-grade">${temps.map((t) => `<label class="temporada-opcao"><input type="checkbox" value="${t.numero}" ${Number(t.numero) ? 'checked' : ''}>
+          <span><b>${Number(t.numero) ? 'Temporada ' + t.numero : 'Especiais'}</b><small>${t.episodios || '?'} episódios</small></span></label>`).join('')}</div>
+        <label class="opcao"><span><b>Completar com outros idiomas</b><small>Quando faltar texto em inglês, usa o idioma que tiver</small></span><input type="checkbox" role="switch" class="chave" id="temp-idiomas" ${c.analisar_idiomas ? 'checked' : ''}></label>`,
+      botoes: [{ txt: 'Cancelar' }, { txt: 'Importar', cls: 'btn-pri', icone: 'baixar', acao: async (f) => {
+        const numeros = $$('.temporada-opcao input:checked', f).map((x) => x.value);
+        if (!numeros.length) { aviso('Marque pelo menos uma temporada.'); return true; }
+        if (!(await podeSubstituirLista())) return true;
+        resultado(await chamar('importar_lote', [{ codigo: s.codigo, temporadas: numeros.join(','), wiki: '', completar: $('#temp-idiomas', f).checked }]));
+      } }] });
+    const contar = () => {
+      const marcadas = $$('.temporada-opcao input:checked', fundo);
+      const eps = temps.filter((t) => marcadas.some((x) => x.value === String(t.numero))).reduce((n, t) => n + (t.episodios || 0), 0);
+      $('.modal-rodape .info', fundo).textContent = `${marcadas.length} temporada(s) · ${eps} episódios`;
+    };
+    $$('.temporada-opcao input', fundo).forEach((x) => { x.onchange = contar; });
+    $('#temp-todas', fundo).onclick = () => { $$('.temporada-opcao input', fundo).forEach((x) => { x.checked = true; }); contar(); };
+    $('#temp-nenhuma', fundo).onclick = () => { $$('.temporada-opcao input', fundo).forEach((x) => { x.checked = false; }); contar(); };
+    contar();
+  }
+
+  // Lotes grandes: a IA recusa textos enormes, então a lista vai em partes.
+  let janelaPartes = null;
+  async function abrirPartes(plano) {
+    const r = plano || await chamar('planejar_copia');
+    if (r.erro) { aviso(r.erro); return; }
+    if (!r.dividir) { resultado(await chamar('copiar')); return; }
+    janelaPartes?.fechar();
+    const proxima = r.partes.find((p) => p.prontos < p.total);
+    const linhas = r.partes.map((p) => { const pronta = p.prontos >= p.total, atual = p === proxima;
+      return `<div class="parte ${pronta ? 'pronta' : ''}"><div class="parte-nome"><b>Parte ${p.numero} de ${r.partes.length}</b><span>${esc(p.de)} até ${esc(p.ate)} · ${p.total} itens</span></div>
+        <span class="selo ${pronta ? 'selo-ok' : p.prontos ? 's-Editado' : ''}">${pronta ? 'Traduzida' : p.prontos ? `Faltam ${p.total - p.prontos}` : 'Falta traduzir'}</span>
+        <button class="${atual ? 'btn-pri' : 'btn-azul'}" data-parte="${p.numero}">${ic('copiar')} Copiar</button></div>`; }).join('');
+    const janela = modal({ icone: 'copiar', titulo: 'Traduzir em partes',
+      texto: `São ${r.episodios} itens. Faça assim: copie uma parte, cole na IA, copie a resposta e clique em “Colar tradução”. O programa reconhece a parte sozinho e lembra onde você parou.`,
+      corpo: `<div class="linha-flex parte-tam"><label for="parte-tam" class="cfg-rotulo">Itens em cada parte</label>
+          <select class="entrada" id="parte-tam">${[10, 20, 30, 40, 50, 75, 100].map((n) => `<option value="${n}" ${n === r.tamanho ? 'selected' : ''}>${n}</option>`).join('')}</select>
+          <a href="#" id="parte-tudo">Copiar tudo de uma vez</a></div>
+        <div class="partes">${linhas}</div>
+        <div class="nota neutra"><b>Prefere anexar arquivos?</b> “Baixar blocos de notas” salva um arquivo por parte e já deixa copiada a mensagem que pede à IA para ir com calma, arquivo por arquivo. Se a IA devolver um arquivo, use “Abrir resposta”.</div>`,
+      botoes: [
+        { txt: 'Baixar blocos de notas', icone: 'exportar', acao: async () => { resultado(await chamar('salvar_partes')); return true; } },
+        { txt: 'Abrir resposta (.txt)', icone: 'pasta', acao: async () => { aposColar(await chamar('abrir_resposta')); return true; } },
+        { txt: 'Colar tradução', cls: 'btn-pri', icone: 'baixar', acao: async () => { aposColar(await chamar('colar')); return true; } },
+      ] });
+    janelaPartes = janela;
+    $('.modal', janela.fundo).style.maxWidth = '820px';
+    $$('[data-parte]', janela.fundo).forEach((b) => b.onclick = async () => resultado(await chamar('copiar_parte', Number(b.dataset.parte))));
+    $('#parte-tam', janela.fundo).onchange = async (ev) => abrirPartes(await chamar('planejar_copia', Number(ev.target.value)));
+    $('#parte-tudo', janela.fundo).onclick = async (ev) => { ev.preventDefault(); janela.fechar(); resultado(await chamar('copiar')); };
+  }
+
+  // Depois de colar: confere se veio tudo e já mostra o próximo passo.
+  function aposColar(r) {
+    if (!r || r.cancelado) return;
+    resultado(r);
+    if (!r.ok) return;
+    if (r.partes) abrirPartes();
+    if (r.faltam?.length) {
+      modal({ icone: 'alerta', alerta: true, estreito: true, titulo: r.texto,
+        texto: `Faltaram: <b>${r.faltam.slice(0, 30).map((f) => esc(f.rotulo)).join(', ')}${r.faltam.length > 30 ? '...' : ''}</b>. O que veio já foi guardado.`,
+        botoes: [{ txt: 'Agora não' }, { txt: 'Copiar os que faltam', cls: 'btn-pri', icone: 'copiar', acao: async () => { resultado(await chamar('copiar_faltando', r.faltam.map((f) => f.id))); } }] });
+    }
+    if (r.nomes?.length) {
+      modal({ icone: 'livro', titulo: 'Nomes adaptados encontrados pela IA',
+        texto: 'Abra as fontes para conferir, porque a IA pode errar. Os que ficarem marcados vão para o glossário da série e passam a valer nas próximas partes e temporadas.',
+        corpo: `<div class="nomes-lista">${r.nomes.map((n, i) => `<label class="nome-item"><input type="checkbox" data-nome="${i}" checked>
+          <span><b>${esc(n.original)} → ${esc(n.adaptado)}</b><small>${esc(n.serie)}</small>
+          ${/^https?:\/\//i.test(n.fonte) ? `<a href="#" data-link="${esc(n.fonte)}">${esc(n.fonte)}</a>` : `<small>Fonte: ${esc(n.fonte)}</small>`}</span></label>`).join('')}</div>`,
+        botoes: [{ txt: 'Agora não' }, { txt: 'Guardar', cls: 'btn-pri', icone: 'salvos', acao: async (f) => {
+          const escolhidos = $$('[data-nome]:checked', f).map((c) => r.nomes[Number(c.dataset.nome)]);
+          if (escolhidos.length) { resultado(await chamar('guardar_nomes', escolhidos)); atualizarGlossarios(); }
+        } }] });
+      $$('.fundo-modal:last-child [data-link]', $('#modais')).forEach((a) => a.onclick = async (ev) => { ev.preventDefault(); resultado(await chamar('abrir_link', a.dataset.link)); });
+    }
+  }
+
+  // Nome trocado pelo glossário não é "nome que sumiu" na conferência da tradução.
+  async function atualizarGlossarios() {
+    try { S.glossarios = await chamar('nomes_glossario'); } catch (_) { return; }
+    const e = porId(S.sel);
+    if (e) conferirNomes(e);
   }
 
   // Janela "Idiomas no TMDB": marca quais idiomas usar e em que ordem (o primeiro que
@@ -965,7 +1127,8 @@
     };
   }
 
-  function abrirLote() {
+  async function abrirLote() {
+    const cfgLote = await chamar('ler_config');
     const linhaLote = (codigo = '', temporadas = 'todas', wiki = '') => `
       <div class="lote-linha">
         <div class="lote-serie"><div class="poster m" aria-hidden="true"></div><div><b>${codigo ? 'Buscando...' : 'Nova série'}</b><small>Digite o código do TMDB</small></div></div>
@@ -975,12 +1138,15 @@
         <button class="btn-icone l-rem" style="width:36px;height:36px;border:0" aria-label="Remover linha">${ic('lixo')}</button>
       </div>`;
     const { fundo } = modal({ icone: 'camadas', titulo: 'Importar em lote',
-      texto: 'Uma linha por série. Em temporadas, use “todas” ou algo como “1-3, 5”. O link é opcional: Wiki (uma temporada por linha) ou TVDB (aceita várias temporadas). Sem link, os textos vêm do TMDB.',
-      corpo: `<div class="lote-cols"><span>SÉRIE</span><span>CÓDIGO</span><span>TEMPORADAS</span><span>LINK (WIKI OU TVDB)</span><span></span></div>
+      texto: 'Uma linha por série, com o código de cada uma. O link é opcional: Wiki (uma temporada por linha) ou TVDB (aceita várias temporadas). Sem link, os textos vêm do TMDB.',
+      corpo: `<label class="opcao"><span><b>Todas as temporadas de cada série</b><small>Desligue para escolher as temporadas em cada linha, como “1-3, 5”. Os Especiais ficam de fora.</small></span><input type="checkbox" role="switch" class="chave" id="lote-todas" checked></label>
+        <label class="opcao"><span><b>Completar com outros idiomas</b><small>Quando faltar texto em inglês, usa o idioma que tiver</small></span><input type="checkbox" role="switch" class="chave" id="lote-idiomas" ${cfgLote.analisar_idiomas ? 'checked' : ''}></label>
+        <div class="lote-cols"><span>SÉRIE</span><span>CÓDIGO</span><span>TEMPORADAS</span><span>LINK (WIKI OU TVDB)</span><span></span></div>
         <div id="lote-linhas" style="display:flex;flex-direction:column;gap:8px">${linhaLote(S.E.serie?.codigo || '')}</div>
         <button class="btn-tracejado" id="lote-mais">${ic('mais')}Adicionar série</button>`,
       botoes: [{ txt: 'Cancelar' }, { txt: 'Importar tudo', cls: 'btn-pri', icone: 'baixar', acao: async (f) => {
-        const itens = $$('.lote-linha', f).map((l) => ({ codigo: $('.l-cod', l).value.trim(), temporadas: $('.l-temp', l).value.trim(), wiki: $('.l-wiki', l).value.trim() }))
+        const todas = $('#lote-todas', f).checked, completar = $('#lote-idiomas', f).checked;
+        const itens = $$('.lote-linha', f).map((l) => ({ codigo: $('.l-cod', l).value.trim(), temporadas: todas ? 'todas' : $('.l-temp', l).value.trim(), wiki: $('.l-wiki', l).value.trim(), completar }))
           .filter((i) => i.codigo || i.wiki);
         if (!itens.length) { aviso('Adicione pelo menos uma série.'); return true; }
         const c = await chamar('conferir_lote', itens);
@@ -991,6 +1157,7 @@
     const caixa = $('#lote-linhas', fundo);
     const ligar = (l) => {
       $('.l-rem', l).onclick = () => { l.remove(); contar(); };
+      $('.l-temp', l).disabled = $('#lote-todas', fundo).checked;
       const cod = $('.l-cod', l);
       const procurar = async () => {
         const v = cod.value.trim();
@@ -1003,6 +1170,8 @@
         nome.textContent = `${s.nome}${s.ano ? ' (' + s.ano + ')' : ''}`;
         info.textContent = 'Encontrada'; info.className = 'ok';
         pst.outerHTML = s.poster ? `<img class="poster m" src="${esc(s.poster)}" alt="">` : '<div class="poster m" aria-hidden="true"></div>';
+        const t = await chamar('temporadas_serie', v);
+        if (t.temporadas && cod.value.trim() === v) info.textContent = `${t.temporadas} temporada${t.temporadas > 1 ? 's' : ''} · ${t.episodios} episódios`;
       };
       cod.addEventListener('change', procurar);
       $$('input', l).forEach((i) => i.addEventListener('input', contar));
@@ -1012,6 +1181,10 @@
       const n = $$('.lote-linha', fundo).filter((l) => $('.l-cod', l).value.trim()).length;
       $('.modal-rodape .info', fundo).textContent = n ? `${n} série${n > 1 ? 's' : ''} no lote` : '';
     };
+    $('#lote-todas', fundo).onchange = (ev) => $$('.l-temp', fundo).forEach((c) => {
+      c.disabled = ev.target.checked;
+      c.value = ev.target.checked ? 'todas' : '1';
+    });
     $$('.lote-linha', caixa).forEach(ligar);
     $('#lote-mais', fundo).onclick = () => { caixa.insertAdjacentHTML('beforeend', linhaLote()); ligar(caixa.lastElementChild); $('.l-cod', caixa.lastElementChild).focus(); contar(); };
     contar();
@@ -1048,10 +1221,16 @@
           <button class="btn-azul pequeno" id="cfg-procurar" type="button">Procurar atualização agora</button></section>
       </div><div class="cfg-coluna">
         <section class="cfg-grupo"><h2>Ao importar</h2>
+          ${opcao('desmarcar', c.desmarcar_portugues, 'Desmarcar quem já tem português no TMDB', 'Episódio com título e sinopse prontos vem desmarcado (precisa da chave da API)')}
           ${opcao('idiomas', c.analisar_idiomas, 'Ver os idiomas disponíveis no TMDB', 'Deixa completar o inglês com outros idiomas')}
           ${opcao('serie', c.pagina_serie, 'Mostrar a página da série no topo', 'Item SÉRIE e sinopse da temporada antes do E01')}
           ${opcao('temporada', c.sinopse_temporada, 'Importar também a sinopse da temporada', 'Aparece como primeiro item (TEMP)')}
           ${opcao('prefixo', c.conferir_prefixo, 'Conferir prefixo dos títulos na Wiki', 'Oferece “Quest 01:” quando o TMDB não traz')}</section>
+        <section class="cfg-grupo"><h2>Ao traduzir</h2>
+          ${opcao('nomes', c.nomes_adaptados, 'Usar nomes oficiais adaptados, com fonte', 'Desligado, todos os nomes ficam como no original')}
+          ${opcao('partes', c.copiar_partes, 'Dividir listas grandes ao copiar', 'Para a IA não recusar nem cortar o texto')}
+          <div class="campo"><label for="cfg-tamanho" class="cfg-rotulo">Itens em cada parte</label>
+            <select class="entrada" id="cfg-tamanho">${[10, 20, 30, 40, 50, 75, 100].map((n) => `<option value="${n}" ${Number(c.tamanho_parte) === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div></section>
         <section class="cfg-grupo"><h2>Ao enviar</h2>
           ${opcao('revisar', c.revisar_envio, 'Revisar a tradução antes de enviar', 'Aponta sinopses longas e nomes que sumiram')}
           ${opcao('tvdb', c.usar_tvdb, 'Usar o TVDB', 'Mostra a conta do TVDB e a opção na janela de envio')}</section>
@@ -1059,7 +1238,7 @@
       botoes: [] });
     const salvarConfig = async (chave = null) => {
       const f = fundo;
-      const r = await chamar('salvar_config', chave, $('#cfg-idioma', f).value, $('#cfg-limite', f).value, $('#cfg-temporada', f).checked, $('#cfg-prefixo', f).checked, $('#cfg-revisar', f).checked, $('#cfg-idiomas', f).checked, $('#cfg-serie', f).checked, $('#cfg-atualizar', f).checked, $('#cfg-tvdb', f).checked, $('#cfg-fechar', f).checked);
+      const r = await chamar('salvar_config', chave, $('#cfg-idioma', f).value, $('#cfg-limite', f).value, $('#cfg-temporada', f).checked, $('#cfg-prefixo', f).checked, $('#cfg-revisar', f).checked, $('#cfg-idiomas', f).checked, $('#cfg-serie', f).checked, $('#cfg-atualizar', f).checked, $('#cfg-tvdb', f).checked, $('#cfg-fechar', f).checked, $('#cfg-partes', f).checked, Number($('#cfg-tamanho', f).value), $('#cfg-nomes', f).checked, $('#cfg-desmarcar', f).checked);
       S.usarTvdb = r.usar_tvdb; renderLoginTvdb();
       S.temChave = r.tem_chave; S.limite = Number(r.limite); S.E.idioma = r.idioma;
       aplicarTema($('#cfg-claro', f).checked);
@@ -1263,7 +1442,7 @@
         for (let i = 0; i < r.series.length; i++) {
           if (textos[i] !== r.series[i].texto) ultimo = await chamar('salvar_glossario', r.series[i].codigo, r.series[i].nome, textos[i]);
         }
-        if (ultimo) resultado(ultimo);
+        if (ultimo) { resultado(ultimo); atualizarGlossarios(); }
       } }] });
     const sel = $('#glo-serie', fundo), txt = $('#glo-texto', fundo);
     txt.value = textos[0];
@@ -1286,8 +1465,8 @@
     modal({ pagina: 'btn-guia', icone: 'livro', titulo: 'Como usar o Sinopse Editor', texto: 'Quatro passos, do texto original até o site. O trabalho é guardado sozinho.',
       corpo: `<ol class="passos-novos">
           ${passo(1, 'Escolha a série', 'Busque pelo nome ou pelo código do TMDB. Depois escolha a temporada.')}
-          ${passo(2, 'Importe os textos', 'Do TMDB, de uma Wiki, do TVDB ou de uma planilha. Para várias temporadas, use o Lote.')}
-          ${passo(3, 'Traduza', '“Copiar para traduzir” leva as instruções. Cole na sua IA, copie a resposta inteira e clique em “Colar tradução”.')}
+          ${passo(2, 'Importe os textos', 'Do TMDB, de uma Wiki, do TVDB ou de uma planilha. Em Importar, escolha uma temporada ou todas.')}
+          ${passo(3, 'Traduza', '“Copiar para traduzir” leva as instruções. Listas grandes vão em partes, copiadas ou como blocos de notas. Cole a resposta em “Colar tradução”.')}
           ${passo(4, 'Confira e envie', 'Revise cada episódio. Escolha o site (TMDB, TVDB ou os dois) e se mantém ou substitui o que já existe.')}</ol>
         <div class="guia-duas"><section class="cfg-grupo"><h2>Atalhos do teclado</h2><div class="atalhos">
           ${tecla('↑ ↓ ou J K', 'Passar de episódio')}${tecla('Espaço', 'Marcar ou desmarcar')}${tecla('Enter', 'Editar o título')}${tecla('Ctrl + F', 'Localizar e substituir')}${tecla('Shift + clique', 'Marcar uma faixa de episódios')}</div></section>
@@ -1412,6 +1591,13 @@
     const chave = (campo, nome, n) => `<div class="troca"><span class="troca-nome">${nome}</span>
       <div class="segmento" data-campo="${campo}"><button type="button" data-v="0" aria-pressed="${!S.sub[campo]}">Manter</button><button type="button" data-v="1" aria-pressed="${S.sub[campo]}">Substituir</button></div>
       ${p.previsao ? `<span class="apagado">${n ? `${n} já existe${n > 1 ? 'm' : ''}` : 'nenhum existe ainda'}</span>` : ''}</div>`;
+    const lerDestinos = () => $$('[data-dest]', fundoEnvio).map((linha) => {
+      const d = Object.assign({}, tv.destinos[Number(linha.dataset.dest)]);
+      $$('[data-k]', linha).forEach((c) => { d[c.dataset.k] = c.value.trim(); });
+      const m = d.link.match(/thetvdb\.com\/series\/[^/?#]+\/seasons\/[a-z]+\/(\d+)/i);
+      if (m && !linha.querySelector('[data-k="temporada_tvdb"]').dataset.mexeu) d.temporada_tvdb = m[1];
+      return d;
+    });
     const { fundo: fundoEnvio, fechar: fecharEnvio } = modal({ icone: 'enviar', titulo: `Enviar ${p.total || tv.total} episódio${(p.total || tv.total) > 1 ? 's' : ''}`, texto: esc(p.grupos.map((g) => g.nome).join(' · ') + ' · ' + p.idioma),
       corpo: `
         ${tv.destinos.length ? `<div class="nota neutra" id="env-tvdb">
@@ -1428,6 +1614,8 @@
               <div class="campo"><label>Temporada no TVDB</label><input class="entrada" data-k="temporada_tvdb" value="${esc(d.temporada_tvdb)}"></div>
               <div class="campo"><label title="Se o E01 daqui é o E05 no TVDB, coloque 4">Somar ao nº do episódio</label><input class="entrada" data-k="deslocamento" type="number" value="${esc(d.deslocamento)}"></div></div>`).join('')}
             <span style="font-size:12px;color:var(--apagado)">Usa a numeração “oficial” do TVDB. Cole o link da série (ou da temporada). O programa lembra para as próximas vezes.</span></div>
+            <div class="conferir-tvdb"><button type="button" class="btn-azul pequeno" id="env-tvdb-conferir">${ic('check')} Conferir com o TVDB antes de enviar</button><small>Só lê o site: compara a temporada, os números e os títulos.</small></div>
+            <div id="env-tvdb-resultado" class="conferencia"></div>
           </div></div>` : ''}
         <div class="troca-bloco"><b class="bloco-rotulo">Se o site já tiver texto em português</b>${chave('t', 'Títulos', ex.titulo)}${chave('s', 'Sinopses', ex.sinopse)}</div>
         ${p.sem_codigo ? `<div class="nota neutra">${p.sem_codigo} episódio(s) sem código da série ficarão de fora.</div>` : ''}
@@ -1438,13 +1626,7 @@
         const tmdb = $('#env-site-tmdb', fundoEnvio)?.checked ?? true;
         let tvdb = null;
         if ($('#env-site-tvdb', fundoEnvio)?.checked) {
-          tvdb = $$('[data-dest]', fundoEnvio).map((linha) => {
-            const d = Object.assign({}, tv.destinos[Number(linha.dataset.dest)]);
-            $$('[data-k]', linha).forEach((c) => { d[c.dataset.k] = c.value.trim(); });
-            const m = d.link.match(/thetvdb\.com\/series\/[^/?#]+\/seasons\/[a-z]+\/(\d+)/i);
-            if (m && !linha.querySelector('[data-k="temporada_tvdb"]').dataset.mexeu) d.temporada_tvdb = m[1];
-            return d;
-          });
+          tvdb = lerDestinos();
           if (tvdb.some((d) => !d.link)) { aviso('Cole o link do TVDB de cada temporada (ou desmarque o TVDB).'); return true; }
         }
         if (!tmdb && !tvdb) { aviso('Escolha pelo menos um site.'); return true; }
@@ -1464,6 +1646,34 @@
       if (alterar) alterar.onclick = (ev) => { ev.preventDefault(); $('#env-tvdb-campos', fundoEnvio).hidden = false; alterar.parentElement.hidden = true; };
       const entrar = $('#env-tvdb-login', fundoEnvio);
       if (entrar) entrar.onclick = (ev) => { ev.preventDefault(); chamar('entrar_tvdb'); };
+      const conferir = $('#env-tvdb-conferir', fundoEnvio);
+      const conferirTvdb = async () => {
+        const destinos = lerDestinos(), caixa = $('#env-tvdb-resultado', fundoEnvio);
+        if (destinos.some((d) => !d.link)) { aviso('Cole o link do TVDB de cada temporada primeiro.'); return; }
+        conferir.disabled = true;
+        caixa.innerHTML = `<span class="apagado">Lendo ${destinos.length} temporada(s) no TVDB...</span>`;
+        const r = await chamar('conferir_tvdb', destinos);
+        conferir.disabled = false;
+        if (r.erro) { caixa.innerHTML = `<span class="erro-txt">${esc(r.erro)}</span>`; return; }
+        caixa.innerHTML = r.destinos.map((d, n) => {
+          if (d.erro) return `<div class="conf-item ruim"><b>Temporada ${esc(d.temporada)}</b><span>Não consegui ler: ${esc(d.erro)}. Confira o link e o número da temporada.</span></div>`;
+          const bom = !d.faltam.length && (!d.comparados || d.batem === d.comparados);
+          return `<div class="conf-item ${bom ? 'bom' : 'ruim'}"><b>Temporada ${esc(d.temporada)} → ${esc(d.nome_tvdb || 'TVDB T' + d.temporada_tvdb)}</b>
+            <span>${d.total_tvdb} episódios no TVDB · ${d.comparados ? `${d.batem} de ${d.comparados} títulos batem` : 'sem título original para comparar'}</span>
+            ${d.faltam.length ? `<span>Não existem lá: ${d.faltam.slice(0, 20).map((x) => 'E' + x).join(', ')}${d.faltam.length > 20 ? '...' : ''}</span>` : ''}
+            ${d.sugestao ? `<span class="conf-sugestao">Parece deslocada: somando ${d.sugestao.deslocamento}, ${d.sugestao.batem} títulos batem. <a href="#" data-somar="${n}" data-valor="${d.sugestao.deslocamento}">Usar essa soma</a></span>` : ''}
+            ${d.diferentes.length ? `<details><summary>Ver título(s) diferente(s): ${d.diferentes.length}</summary>${d.diferentes.slice(0, 60).map((x) => `<div class="conf-dif"><b>E${x.numero}</b> Aqui: ${esc(x.aqui)}<br>TVDB (E${x.numero_tvdb}): ${esc(x.tvdb)}</div>`).join('')}</details>` : ''}</div>`;
+        }).join('');
+        $$('[data-somar]', caixa).forEach((a) => a.onclick = (ev) => {
+          ev.preventDefault();
+          const linha = $(`[data-dest="${a.dataset.somar}"]`, fundoEnvio);
+          $('[data-k="deslocamento"]', linha).value = a.dataset.valor;
+          $('#env-tvdb-campos', fundoEnvio).hidden = false;
+          $('.tvdb-resumo', fundoEnvio)?.setAttribute('hidden', '');
+          conferirTvdb();
+        });
+      };
+      if (conferir) conferir.onclick = conferirTvdb;
     }
     $$('.rev-item', fundoEnvio).forEach((b) => b.onclick = () => {
       fecharEnvio();
@@ -1501,12 +1711,19 @@
   // ==================================================================== início
   function ligarTela() {
     $('#imp-tmdb').onclick = importarTmdb;
+    $('#imp-todas').onclick = importarTemporadas;
     $('#imp-wiki').onclick = importarWiki;
     $('#imp-tvdb').onclick = importarTvdb;
     $('#imp-lote').onclick = abrirLote;
     $('#imp-planilha').onclick = abrirPlanilha;
-    $('#btn-copiar').onclick = async () => resultado(await chamar('copiar'));
-    $('#btn-colar').onclick = async () => resultado(await chamar('colar'));
+    $('#btn-copiar').onclick = () => abrirPartes();
+    $('#btn-colar').onclick = async () => aposColar(await chamar('colar'));
+    $('#btn-partes').onclick = () => abrirPartes();
+    $('#btn-recolher-todas').onclick = () => {
+      const chaves = [...grupos(S.E.episodios).keys()];
+      if (chaves.every((k) => S.recolhidos.has(k))) S.recolhidos.clear(); else chaves.forEach((k) => S.recolhidos.add(k));
+      renderLista();
+    };
     $('#btn-instrucoes').onclick = abrirInstrucoes;
     $('#btn-glossario').onclick = abrirGlossario;
     $('#btn-exportar').onclick = async () => resultado(await chamar('exportar_planilha'));
@@ -1573,6 +1790,7 @@
     $('#btn-mensagens').onclick = () => {
       const m = $('#mensagens'), aberto = !m.classList.contains('aberto');
       m.classList.toggle('aberto', aberto);
+      if (aberto) mostrarLog();
       $('#btn-mensagens').setAttribute('aria-pressed', String(aberto));
     };
     $('#fechar-mensagens').onclick = () => { $('#mensagens').classList.remove('aberto'); $('#btn-mensagens').setAttribute('aria-pressed', 'false'); };
@@ -1601,6 +1819,12 @@
         if (!(await confirmar('Tirar da lista?', `O episódio ${e.numero} de ${esc(nomeGrupo(e))} sai só da lista do programa (nada muda no TMDB).`, 'Tirar'))) return;
         if (String(e.id) === String(S.sel)) { S.sel = null; $('#inspetor').classList.remove('aberto'); }
         resultado(await chamar('remover', [e.id]));
+        return;
+      }
+      const cab = ev.target.closest('.grupo-cab');
+      if (cab && !ev.target.closest('label')) {
+        if (!S.recolhidos.delete(cab.dataset.chave)) S.recolhidos.add(cab.dataset.chave);
+        renderLista();
         return;
       }
       const linha = ev.target.closest('.ep');

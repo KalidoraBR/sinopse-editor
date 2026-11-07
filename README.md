@@ -41,9 +41,9 @@ Funciona com qualquer série: tokusatsu, anime, drama, animação.
 
 <table>
   <tr>
-    <td width="33%" valign="top"><b>Importação flexível</b><br><sub>TMDB (em vários idiomas), Wikis do Fandom, TVDB ou planilha. Várias séries e temporadas de uma vez pelo Lote.</sub></td>
-    <td width="33%" valign="top"><b>Tradução guiada</b><br><sub>"Copiar para traduzir" leva um prompt pronto, com glossário da série e a regra de nunca traduzir nomes próprios.</sub></td>
-    <td width="33%" valign="top"><b>Revisão antes de enviar</b><br><sub>Aponta títulos não traduzidos, sinopses longas e nomes que sumiram. Original e tradução lado a lado.</sub></td>
+    <td width="33%" valign="top"><b>Importação flexível</b><br><sub>TMDB (em vários idiomas), Wikis do Fandom, TVDB ou planilha. Uma temporada, todas as temporadas da série ou várias séries de uma vez pelo Lote.</sub></td>
+    <td width="33%" valign="top"><b>Tradução guiada</b><br><sub>"Copiar para traduzir" leva um prompt pronto, com glossário da série. Nomes adaptados da dublagem só com fonte. Listas grandes vão em partes, copiadas ou como blocos de notas.</sub></td>
+    <td width="33%" valign="top"><b>Revisão antes de enviar</b><br><sub>Aponta títulos não traduzidos, sinopses longas e nomes que sumiram. Confere com o TVDB se a temporada e a numeração batem.</sub></td>
   </tr>
   <tr>
     <td valign="top"><b>Envio automático</b><br><sub>Preenche as páginas de edição do TMDB e do TVDB sozinho, com o navegador escondido, e mantém o que já existe se você preferir.</sub></td>

@@ -5,7 +5,7 @@
 <title>Sinopse Editor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="estilo.css?v=1.4-1793410680">
+<link rel="stylesheet" href="estilo.css?v=1.5-1793453543">
 </head>
 <body>
 
@@ -46,7 +46,8 @@
   <symbol id="i-hash" viewBox="0 0 24 24"><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/></symbol>
   <symbol id="i-salvos" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></symbol>
   <symbol id="i-lista" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
-  <symbol id="i-recolher" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15.5 9.5L13 12l2.5 2.5"/></symbol>
+  <symbol id="i-seta" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-recolher"viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15.5 9.5L13 12l2.5 2.5"/></symbol>
 </svg>
 
 <div class="app">
@@ -103,7 +104,8 @@
       <div class="menu">
         <button class="btn-acao trava" data-menu><svg class="i"><use href="#i-baixar"/></svg>Importar ▾</button>
         <div class="menu-lista">
-          <button class="trava" id="imp-tmdb"><svg class="i"><use href="#i-filme"/></svg>TMDB</button>
+          <button class="trava" id="imp-tmdb"><svg class="i"><use href="#i-filme"/></svg>TMDB: esta temporada</button>
+          <button class="trava" id="imp-todas"><svg class="i"><use href="#i-camadas"/></svg>TMDB: todas as temporadas</button>
           <button class="trava" id="imp-wiki"><svg class="i"><use href="#i-globo"/></svg>Wiki (Fandom)</button>
           <button class="trava" id="imp-tvdb"><svg class="i"><use href="#i-banco"/></svg>TVDB</button>
           <button class="trava" id="imp-lote"><svg class="i"><use href="#i-camadas"/></svg>Lote: várias séries e temporadas</button>
@@ -118,6 +120,7 @@
       <div class="menu">
         <button class="btn-acao quadrado" data-menu aria-label="Mais opções" title="Mais opções">⋯</button>
         <div class="menu-lista direita">
+          <button id="btn-partes"><svg class="i"><use href="#i-copiar"/></svg>Traduzir em partes</button>
           <button id="btn-instrucoes"><svg class="i"><use href="#i-lapis"/></svg>Instruções de tradução</button>
           <button id="btn-glossario"><svg class="i"><use href="#i-livro"/></svg>Glossário da série</button>
           <button id="btn-exportar"><svg class="i"><use href="#i-exportar"/></svg>Salvar planilha</button>
@@ -146,6 +149,7 @@
           <span class="total" id="total">Nenhum episódio</span>
           <span class="resumo" id="resumo"></span>
           <div class="espaco"></div>
+          <button class="btn-mini" id="btn-recolher-todas" hidden><svg class="i"><use href="#i-seta"/></svg><span></span></button>
           <button class="btn-mini trava" id="btn-pt-tvdb" hidden title="Usar o título e a sinopse em português que o TVDB já tem"><svg class="i"><use href="#i-banco"/></svg><span></span></button>
           <button class="btn-mini trava" id="btn-complementar" hidden title="Buscar em outro site o texto que falta"><svg class="i"><use href="#i-peca"/></svg><span></span></button>
           <button class="btn-mini trava" id="btn-repetir" hidden title="Marca só os que falharam e envia de novo"><svg class="i"><use href="#i-repetir"/></svg><span></span></button>
@@ -184,6 +188,6 @@
 <div class="notificacoes" id="notificacoes" aria-live="polite"></div>
 <div id="modais"></div>
 
-<script src="app.js?v=1.4-1793410680"></script>
+<script src="app.js?v=1.5-1793453543"></script>
 </body>
 </html>

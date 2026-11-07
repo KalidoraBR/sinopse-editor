@@ -785,3 +785,77 @@ kbd { justify-self: start; padding: 3px 8px; border-radius: 6px; background: var
 input.chave { appearance: none; -webkit-appearance: none; flex-shrink: 0; position: relative; width: 42px; height: 24px; margin: 0; border-radius: 12px; background: var(--borda-forte); cursor: pointer; transition: background .15s; }
 input.chave::before { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
 input.chave:checked { background: #01B4E4; } input.chave:checked::before { transform: translateX(18px); }
+
+body.serie-vazia .lista-topo, body.serie-vazia .inspetor { display: none; }
+body.serie-vazia .lista { background: transparent; border: 0; }
+.importar-grande { display: flex; align-items: center; justify-content: center; gap: 10px; height: 60px; border-radius: 12px; font-size: 17px; }
+.importar-opcoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.importar-opcoes .importar-grande { font-size: 15px; font-weight: 700; }
+
+/* 1.5: a lista alinha com o topo e nada fica por cima da situação */
+.centro { padding: 0; }
+.ep, body.claro .ep { padding-right: 56px; }
+.tirar-ep { right: 16px; }
+.grupo-cab, body.claro .grupo-cab { padding: 12px 16px; cursor: pointer; }
+.grupo-cab:hover { background: var(--elevado); }
+.barrinha { width: 160px; background: var(--trilha); }
+.barrinha div { background: #01B4E4; }
+.etq, body.claro .etq, .fonte-tag, .etiqueta, .hist-tipo { border-radius: 6px; }
+.seta-grupo { margin-left: auto; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; color: var(--apagado); transition: transform .15s; transform: rotate(180deg); }
+.grupo-cab.fechado .seta-grupo { transform: none; }
+.tirar-grupo { margin-left: 0; opacity: 1; background: transparent; }
+#btn-recolher-todas svg.i { transition: transform .15s; }
+#btn-recolher-todas.virada svg.i { transform: rotate(180deg); }
+
+/* importar temporadas */
+.temporadas-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; max-height: 44vh; overflow: auto; }
+.temporada-opcao { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--cartao); border: 1px solid var(--borda); cursor: pointer; }
+.temporada-opcao:has(input:checked) { border-color: #01B4E4; background: var(--sel); }
+.temporada-opcao span { display: flex; flex-direction: column; gap: 2px; }
+.temporada-opcao small { font-size: 12px; color: var(--apagado); }
+
+/* traduzir em partes */
+.parte-tam { gap: 12px; }
+.parte-tam .entrada { width: 90px; height: 36px; }
+.parte-tam a { margin-left: auto; font-size: 13px; font-weight: 600; }
+.partes { display: flex; flex-direction: column; gap: 8px; max-height: 40vh; overflow: auto; }
+.parte { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 10px; background: var(--cartao); border: 1px solid var(--borda); }
+.parte.pronta { opacity: .7; }
+.parte-nome { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.parte-nome span { font-size: 13px; color: var(--apagado); }
+.parte button { width: 110px; height: 36px; justify-content: center; font-size: 13px; }
+.modal-rodape button { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+
+/* desempenho: só o que está na tela é calculado, e as animações não mexem no layout */
+.ep { content-visibility: auto; contain-intrinsic-size: auto 64px; max-height: none; transition: background .15s, opacity .25s, transform .25s; }
+.ep.saindo { background: transparent; opacity: 0; transform: translateX(24px); max-height: none; padding-top: 12px; padding-bottom: 12px; }
+body.compacta .ep.saindo { padding-top: 4px; padding-bottom: 4px; }
+.hist-nova, .lado-linha { content-visibility: auto; contain-intrinsic-size: auto 90px; }
+.lista, .inspetor { contain: layout paint; }
+.trilha { contain: layout paint; }
+.trilha.indeterminado div { left: 0; animation: vai 1.2s ease-in-out infinite; }
+@keyframes vai { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+.barrinha { contain: layout paint; }
+
+/* nomes adaptados encontrados pela IA */
+.nomes-lista { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow: auto; }
+.nome-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--cartao); border: 1px solid var(--borda); cursor: pointer; }
+.nome-item span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.nome-item small { font-size: 12px; color: var(--apagado); overflow-wrap: anywhere; }
+.nome-item a { font-size: 12px; overflow-wrap: anywhere; }
+.l-temp:disabled { opacity: .55; }
+
+/* conferir com o TVDB */
+.tvdb-resumo span { max-height: 120px; overflow: auto; }
+.conferir-tvdb { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.conferir-tvdb small { font-size: 12px; color: var(--apagado); }
+.conferencia { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; max-height: 240px; overflow: auto; }
+.conferencia:empty { display: none; }
+.conf-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 8px; background: var(--painel-2); border-left: 3px solid var(--borda-forte); font-size: 13px; }
+.conf-item.bom { border-left-color: var(--ok); }
+.conf-item.ruim { border-left-color: var(--lar); }
+.conf-item span { color: var(--apagado); }
+.conf-item .conf-sugestao { color: var(--ama); }
+.conf-item summary { cursor: pointer; color: var(--link); font-weight: 600; }
+.conf-dif { padding: 6px 0; border-top: 1px solid var(--linha); color: var(--apagado); line-height: 1.45; }
+.conf-dif b { color: var(--texto); margin-right: 4px; }

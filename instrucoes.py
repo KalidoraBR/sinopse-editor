@@ -5,6 +5,31 @@ from automatizador import PASTA
 ARQUIVO_INSTRUCOES = PASTA / "instrucoes_traducao.txt"
 MARCA_EPISODIOS = "EPISÓDIOS:"
 
+# A regra antiga fica guardada: é ela que vale com a opção desligada em Configurações,
+# e a troca também alcança instruções salvas por versões anteriores.
+NOMES_ORIGINAIS = """NOMES PRÓPRIOS: NUNCA TRADUZA
+Mantenha exatamente como estão no original:
+- o nome da série;
+- nomes de personagens;
+- nomes de lugares, cidades, empresas, organizações, grupos e equipes;
+- nomes de criaturas, naves, robôs, armas, objetos, poderes e transformações.
+(Ex.: uma equipe chamada "Alien Rangers" continua "Alien Rangers".)
+Traduza somente o restante das palavras."""
+
+NOMES_ADAPTADOS = """NOMES PRÓPRIOS: USE O NOME OFICIAL, SE HOUVER FONTE
+Isto vale para personagens, vilões, criaturas, lugares, grupos, equipes, naves, robôs, armas, objetos, poderes e transformações, em qualquer série.
+- Pesquise na internet se o nome tem versão adaptada oficial em {idioma}, usada na dublagem, na legenda, na emissora ou no streaming. Procure em wikis de fãs em português, sites de dublagem e páginas oficiais.
+- Se achar uma fonte, use o nome adaptado em todas as sinopses e títulos. Ex.: em Arquivo X, "Cigarette Smoking Man" é "Canceroso" na dublagem brasileira.
+- Sem fonte na internet, ou sem acesso à busca, mantenha o nome original exatamente como está. Não confie só na memória. Se você não tiver acesso à busca, avise isso no resumo inicial.
+- Nunca invente um nome nem traduza ao pé da letra por conta própria. Ex.: "Alien Rangers" só muda se uma fonte mostrar o nome usado no Brasil.
+- Use sempre o mesmo nome em todos os episódios.
+- O GLOSSÁRIO do usuário, quando houver, vale mais do que a sua pesquisa.
+No começo do bloco de código, antes da primeira marca de episódio, liste o que foi adaptado, uma linha por nome, com o link da fonte:
+NOMES ADAPTADOS:
+Nome original = Nome adaptado | link da fonte
+FIM DOS NOMES
+Se nada foi adaptado, escreva só "NOMES ADAPTADOS: nenhum"."""
+
 PROMPT_PADRAO = """Você é um tradutor e adaptador profissional de séries de TV (dramas, comédias, animações, anime, tokusatsu e outras).
 
 TAREFA: traduzir para o {idioma} os títulos e as sinopses dos episódios de {serie}{ano}{temporada}. O texto será publicado no TMDB, então precisa ter qualidade profissional.
@@ -13,14 +38,7 @@ ANTES DE TRADUZIR: PESQUISE A SÉRIE
 - Faça uma pesquisa breve sobre {serie} (use a busca na internet, se você tiver acesso; senão, use o que você sabe): o tema e o clima da série, a história geral, os personagens principais e se ela foi exibida ou é conhecida no Brasil.
 - Use essa pesquisa para adaptar com coerência: escolha palavras que combinem com o tema da série (drama, comédia, policial, ficção científica, fantasia etc.).
 
-NOMES PRÓPRIOS: NUNCA TRADUZA
-Mantenha exatamente como estão no original:
-- o nome da série;
-- nomes de personagens;
-- nomes de lugares, cidades, empresas, organizações, grupos e equipes;
-- nomes de criaturas, naves, robôs, armas, objetos, poderes e transformações.
-(Ex.: uma equipe chamada "Alien Rangers" continua "Alien Rangers".)
-Traduza somente o restante das palavras.
+""" + NOMES_ADAPTADOS + """
 
 TÍTULOS
 - Adapte o sentido para um título natural em português, que soe como título de episódio de verdade. Não traduza ao pé da letra.
@@ -42,6 +60,16 @@ FORMATO (obrigatório)
 - Se houver linhas de grupo como "=== Série · Temporada 2 ===", mantenha-as no mesmo lugar.
 - Não junte, não pule e não reordene episódios. Se faltar título ou sinopse no original, deixe a linha vazia.
 - Depois do bloco de código, não escreva mais nada."""
+
+
+def aplicar_regra_nomes(texto, adaptar):
+    """Põe nas instruções a regra de nomes escolhida em Configurações."""
+    de, para = (NOMES_ORIGINAIS, NOMES_ADAPTADOS) if adaptar else (NOMES_ADAPTADOS, NOMES_ORIGINAIS)
+    texto = texto.replace(de, para)
+    # Instruções escritas à mão também recebem a regra, enquanto a opção estiver ligada.
+    if adaptar and NOMES_ADAPTADOS not in texto:
+        texto += "\n\n" + NOMES_ADAPTADOS + "\nEsta regra vale mais do que qualquer outra sobre nomes dada acima."
+    return texto
 
 
 def carregar_instrucoes():
