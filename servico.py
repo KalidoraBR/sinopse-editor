@@ -18,7 +18,7 @@ import nucleo
 from automatizador import STORAGE
 from instrucoes import ARQUIVO_INSTRUCOES, PROMPT_PADRAO, carregar_instrucoes
 
-VERSAO = "1.6"
+VERSAO = "1.6.1"
 FINALIZADOS = ("Enviado", "Já preenchido")
 INCOMPLETOS = ("Sem texto", "Sem sinopse")
 ARQUIVO_HISTORICO = nucleo.PASTA / "historico_envios.json"
@@ -1295,17 +1295,24 @@ class Api:
         ids = getattr(self, "_copiados", None)
         base = [e for p in partes for e in p] or ([e for e in self.episodios if e["id"] in ids] if ids else [])
         traducoes = nucleo.ler_traducao(texto or "", base or self.episodios)
-        recebidos = set()
+        recebidos, iguais = set(), []
         for ident, (titulo, sinopse) in traducoes.items():
             if not (titulo or sinopse):
                 continue
             e = self._por_id(ident)
+            # A IA às vezes devolve o texto sem traduzir: não marca como traduzido.
+            if self._sem_traducao(e, titulo, sinopse):
+                iguais.append(e)
+                continue
             if titulo:
                 e["titulo"] = titulo
             if sinopse:
                 e["sinopse"] = sinopse
             e["situacao"] = "Traduzido"
             recebidos.add(ident)
+        if not recebidos and iguais:
+            return {"erro": f"A IA devolveu {len(iguais)} episódio(s) no idioma original, sem traduzir. "
+                            "Nada foi colado. Peça para a IA traduzir de novo."}
         if not recebidos:
             return {"erro": "Não reconheci o texto copiado. Ele precisa ter as marcas dos "
                             "episódios (ex.: [1]), Título: e Sinopse:."}
@@ -1335,6 +1342,9 @@ class Api:
             texto = f"Vieram {len(recebidos)} de {len(recebidos) + len(faltam)} episódios."
         elif not partes:
             texto += " Confira e envie."
+        if iguais:
+            texto += (f" Atenção: {len(iguais)} vieram sem traduzir (" +
+                      ", ".join(self._rotulo(e) for e in iguais[:6]) + ") e não foram colados.")
         return {"ok": True, "texto": texto, "partes": bool(partes), "recebidos": len(recebidos),
                 "faltam": [{"id": e["id"], "rotulo": self._rotulo(e)} for e in faltam],
                 "nomes": nomes}
@@ -1371,6 +1381,16 @@ class Api:
         except Exception:
             return {"temporadas": 0, "episodios": 0}
         return {"temporadas": len(normais), "episodios": sum(t.get("episodios", 0) for t in normais)}
+
+    @staticmethod
+    def _sem_traducao(e, titulo, sinopse):
+        """True quando o texto recebido é igual ao original (a IA não traduziu)."""
+        os_ = (e.get("original_sinopse") or "").strip()
+        ot = (e.get("original_titulo") or "").strip()
+        s, t = (sinopse or "").strip(), (titulo or "").strip()
+        if s and os_:
+            return s == os_
+        return bool(t and ot and t == ot and len(t.split()) > 1)
 
     def colar(self):
         if not self.episodios:
@@ -1441,6 +1461,9 @@ class Api:
                        and e.get("tvdb") not in ("Enviado", "Já preenchido")
                        and e.get("tipo", "episodio") == "episodio")
             if not (e["enviar"] or so_tvdb) or not (titulo or sinopse):
+                continue
+            # "Traduzido" com o texto igual ao original: a tradução não veio, não envia.
+            if e.get("situacao") == "Traduzido" and self._sem_traducao(e, titulo, sinopse):
                 continue
             codigo = e["codigo"] or padrao["codigo"]
             if not str(codigo).isdigit():
