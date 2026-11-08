@@ -18,7 +18,7 @@ import nucleo
 from automatizador import STORAGE
 from instrucoes import ARQUIVO_INSTRUCOES, PROMPT_PADRAO, carregar_instrucoes
 
-VERSAO = "1.6.1"
+VERSAO = "1.6.2"
 FINALIZADOS = ("Enviado", "Já preenchido")
 INCOMPLETOS = ("Sem texto", "Sem sinopse")
 ARQUIVO_HISTORICO = nucleo.PASTA / "historico_envios.json"
@@ -788,8 +788,17 @@ class Api:
 
     def _idiomas_que_completam(self, codigo, temporada):
         """Inglês primeiro e, se faltar texto, só os idiomas que preenchem o que falta."""
-        if not nucleo.tmdb_configurado():
+        api = nucleo.tmdb_configurado()
+        if not api:
             return []
+        # Se o inglês já tem título e sinopse em todos os episódios, não precisa analisar.
+        try:
+            ingles = api.temporada(codigo, temporada, "en-US")
+            if ingles and all(nucleo.texto_util(e["titulo"], "titulo") and
+                              nucleo.texto_util(e["sinopse"], "sinopse") for e in ingles):
+                return []
+        except Exception:
+            pass
         try:
             r = nucleo.idiomas_temporada(codigo, temporada, self.idioma)
         except Exception as erro:

@@ -316,11 +316,18 @@ def idiomas_temporada(codigo, temporada, destino="pt-BR"):
                         "nome_en": t.get("english_name") or ""})
     if not any(i["codigo"].startswith("en") for i in idiomas):
         idiomas.insert(0, {"codigo": "en-US", "nome": "English", "nome_en": "English"})
-    total, saida = 0, []
-    for i in idiomas[:30]:
+    # Os idiomas são buscados ao mesmo tempo (um por vez levava dezenas de segundos).
+    def buscar(i):
         try:
-            eps = api.temporada(codigo, temporada, i["codigo"])
+            return i, api.temporada(codigo, temporada, i["codigo"])
         except ErroAPI:
+            return i, None
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=10) as grupo:
+        resultados = list(grupo.map(buscar, idiomas[:30]))
+    total, saida = 0, []
+    for i, eps in resultados:
+        if eps is None:
             continue
         total = max(total, len(eps))
         titulos = [e["numero"] for e in eps if texto_util(e["titulo"], "titulo")]
@@ -1010,6 +1017,19 @@ def ler_nomes_adaptados(texto):
     return nomes
 
 
+# Depois da sinopse a IA às vezes escreve outras coisas (a lista de nomes, comentários,
+# ou repete as instruções): nada disso pode entrar no texto enviado.
+_FIM_DA_SINOPSE = re.compile(
+    r"\n\s*\n|\n\s*(?:NOMES ADAPTADOS|FIM DOS NOMES|NOMES EM LOTE|FORMATO|GLOSS[ÁA]RIO|"
+    r"EPIS[ÓO]DIOS\s*:|INSTRU[ÇC][ÕO]ES|Observa[çc][ãa]o|Obs\.|Nota\s*:|- )", re.I)
+
+
+def _limpar_sinopse(texto):
+    texto = (texto or "").strip()
+    fim = _FIM_DA_SINOPSE.search(texto)
+    return (texto[:fim.start()] if fim else texto).strip()
+
+
 def ler_traducao(texto, episodios):
     """Devolve {id do episódio: (título ou None, sinopse ou None)}."""
     if MARCA_EPISODIOS in texto:
@@ -1027,7 +1047,7 @@ def ler_traducao(texto, episodios):
                            corpo, re.S | re.I)
         sinopse = re.search(r"(?:Sinopse|Synopsis)\s*:\s*(.*)", corpo, re.S | re.I)
         saida[ident] = (titulo.group(1).strip() if titulo else None,
-                        sinopse.group(1).strip() if sinopse else None)
+                        _limpar_sinopse(sinopse.group(1)) if sinopse else None)
     return saida
 
 

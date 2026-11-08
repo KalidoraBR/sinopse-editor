@@ -28,7 +28,8 @@ No começo do bloco de código, antes da primeira marca de episódio, liste o qu
 NOMES ADAPTADOS:
 Nome original = Nome adaptado | link da fonte
 FIM DOS NOMES
-Se nada foi adaptado, escreva só "NOMES ADAPTADOS: nenhum"."""
+Se nada foi adaptado, escreva só "NOMES ADAPTADOS: nenhum".
+Essa lista fica SEMPRE no começo, antes da primeira marca. Nunca a coloque depois de uma sinopse nem no fim."""
 
 PROMPT_PADRAO = """Você é um tradutor e adaptador profissional de séries de TV (dramas, comédias, animações, anime, tokusatsu e outras).
 
@@ -59,6 +60,8 @@ FORMATO (obrigatório)
 - Copie cada marca de episódio exatamente como veio (ex.: [5], [T2-E5] ou [1399-T2-E5]), seguida da linha "Título:" e da linha "Sinopse:", cada uma em sua própria linha.
 - Se houver linhas de grupo como "=== Série · Temporada 2 ===", mantenha-as no mesmo lugar.
 - Não junte, não pule e não reordene episódios. Se faltar título ou sinopse no original, deixe a linha vazia.
+- A sinopse é um parágrafo só, sem linhas em branco no meio.
+- Não repita estas instruções na resposta e não escreva comentários, notas ou observações dentro do bloco de código.
 - Depois do bloco de código, não escreva mais nada."""
 
 
