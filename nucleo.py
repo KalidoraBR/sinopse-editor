@@ -7,11 +7,13 @@ Funções longas recebem `avisar(tipo, **dados)` para contar o progresso e
 import csv
 import difflib
 import json
+import os
 import re
 import time
 import urllib.parse
 import urllib.request
 from contextlib import contextmanager
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
@@ -192,9 +194,22 @@ def ler_config():
         return {}
 
 
+def gravar_texto(caminho, texto, encoding="utf-8"):
+    """Grava numa cópia ao lado e troca de uma vez: se o programa fechar no meio, o
+    arquivo antigo continua inteiro."""
+    caminho = Path(caminho)
+    temporario = caminho.with_name(caminho.name + ".tmp")
+    temporario.write_text(texto, encoding=encoding)
+    try:
+        os.replace(temporario, caminho)
+    except OSError:
+        # Arquivo preso por outro programa (antivírus, OneDrive): grava direto.
+        caminho.write_text(texto, encoding=encoding)
+        temporario.unlink(missing_ok=True)
+
+
 def salvar_config(config):
-    ARQUIVO_CONFIG.write_text(json.dumps(config, ensure_ascii=False, indent=1),
-                              encoding="utf-8")
+    gravar_texto(ARQUIVO_CONFIG, json.dumps(config, ensure_ascii=False, indent=1))
 
 
 @contextmanager
@@ -1176,7 +1191,6 @@ def enviar_episodios(itens, idioma, visivel, sub_titulo, sub_sinopse, avisar, de
                 avisar("historico", registro={
                     "quando": time.strftime("%Y-%m-%d %H:%M:%S"), "site": "TMDB", "codigo": str(codigo),
                     "temporada": str(temporada), "numero": ep, "serie": item.get("serie", ""),
-                    "tipo": item.get("tipo", "episodio"),
                     "idioma": idioma, "antes": antes, "depois": depois,
                     "tipo": "desfazer" if forcar else "envio"})
                 ok.append(nome)

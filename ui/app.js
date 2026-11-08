@@ -34,9 +34,11 @@
   // O TVDB guarda o próprio resultado em e.tvdb (Enviado, Já preenchido, Falhou...).
   const problemaTvdb = (e) => !!e.tvdb && !['Enviado', 'Já preenchido'].includes(e.tvdb);
   const faltaTvdb = (e) => S.usarTvdb && S.loginTvdb && finalizado(e) && (e.tipo || 'episodio') === 'episodio' && temTexto(e) && !['Enviado', 'Já preenchido'].includes(e.tvdb);
+  const semAcento = (t) => String(t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   function visiveis() {
-    const f = S.filtro;
-    return S.E.episodios.filter((e) =>
+    const f = S.filtro, q = semAcento(S.buscaLista || '').trim();
+    const achou = (e) => !q || semAcento(`${e.titulo} ${e.original_titulo} e${String(e.numero).padStart(2, '0')} t${e.temporada}e${e.numero}`).includes(q);
+    return S.E.episodios.filter(achou).filter((e) =>
       f === 'todos' ? true :
       f === 'pendentes' ? !finalizado(e) :
       f === 'marcados' ? e.enviar && !finalizado(e) :
@@ -70,17 +72,18 @@
   }
 
   // Notificação animada no canto (tarefa concluída, envio terminado...).
-  function notificar(titulo, texto, tipo = 'ok', ms = 6500) {
+  function notificar(titulo, texto, tipo = 'ok', ms = 6500, acoes = []) {
     const el = document.createElement('div');
     el.className = `notificacao ${tipo}`;
     el.setAttribute('role', 'status');
     el.innerHTML = `<span class="noti-icone">${ic(tipo === 'ok' ? 'check' : 'alerta')}</span>
-      <div><b>${esc(titulo)}</b>${texto ? `<span>${esc(texto)}</span>` : ''}</div>
+      <div><b>${esc(titulo)}</b>${texto ? `<span>${esc(texto)}</span>` : ''}${acoes.length ? `<div class="noti-acoes">${acoes.map((a, i) => `<button class="${i ? 'btn-sec' : 'btn-pri'}" data-acao="${i}">${esc(a.txt)}</button>`).join('')}</div>` : ''}</div>
       <button class="noti-fechar" aria-label="Fechar aviso">${ic('fechar')}</button>
       <i class="noti-tempo" style="animation-duration:${ms}ms"></i>`;
     $('#notificacoes').appendChild(el);
     const tirar = () => { el.classList.add('saindo'); setTimeout(() => el.remove(), 220); };
     $('.noti-fechar', el).onclick = tirar;
+    $$('[data-acao]', el).forEach((b) => b.onclick = () => { tirar(); acoes[Number(b.dataset.acao)].fn(); });
     setTimeout(tirar, ms);
   }
 
@@ -227,7 +230,7 @@
     }
     chips.push(`<label class="oculto-leitor" for="sel-idioma">Idioma de destino</label>
       <select class="chip" id="sel-idioma">${['pt-BR', 'pt-PT'].map((i) => `<option value="${i}" ${S.E.idioma === i ? 'selected' : ''}>${i === 'pt-BR' ? 'Português (Brasil)' : 'Português (Portugal)'}</option>`).join('')}</select>`);
-    if (serie.codigo || S.E.episodios.length) chips.push('<button class="chip-link" id="btn-trocar">Trocar série</button><span class="salvo-auto" title="O trabalho é guardado sozinho a cada mudança">✓ Salvo automaticamente</span>');
+    if (serie.codigo || S.E.episodios.length) chips.push('<button class="chip-link" id="btn-trocar">Trocar série</button><span class="salvo-auto" title="O trabalho é guardado sozinho a cada mudança">✓ Salvo</span>');
     $('#chips').innerHTML = chips.join('');
     $('#btn-trocar')?.addEventListener('click', () => { const v = document.body.classList.toggle('trocando'); if (v) $('#busca').focus(); });
     $('#sel-temporada')?.addEventListener('change', (ev) => { S.E.serie.temporada = ev.target.value; chamar('definir', 'temporada', ev.target.value); });
@@ -241,9 +244,9 @@
   function renderLogin() {
     const txt = $('#login-txt');
     const mapa = {
-      verificando: ['Verificando...', '#93C5FD'], conectado: ['Conectado', '#5FD08A'],
-      desconectado: ['Não conectado — entrar', '#FDA4AF'], expirado: ['Login expirado — entrar', '#FCD34D'],
-      nao_verificado: ['Não verificado', '#FCD34D'],
+      verificando: ['Verificando...', 'var(--azul)'], conectado: ['Conectado', 'var(--ok)'],
+      desconectado: ['Não conectado — entrar', 'var(--ver)'], expirado: ['Login expirado — entrar', 'var(--ama)'],
+      nao_verificado: ['Não verificado', 'var(--ama)'],
     };
     const [t, c] = mapa[S.login] || mapa.verificando;
     txt.textContent = t;
@@ -254,7 +257,7 @@
     $('#btn-conta-tvdb').hidden = !S.usarTvdb;
     const txt = $('#login-tvdb-txt');
     txt.textContent = S.loginTvdb ? 'Conectado' : 'Entrar';
-    txt.style.color = S.loginTvdb ? '#5FD08A' : '';
+    txt.style.color = S.loginTvdb ? 'var(--ok)' : '';
   }
 
   // =================================================================== lista
@@ -305,21 +308,21 @@
         <h1>${escolhida ? 'O que você quer importar?' : 'Qual série você vai traduzir?'}</h1>
         ${escolhida ? `<div class="importar-opcoes"><button class="btn-pri importar-grande" id="hero-tmdb">${ic('filme')} Importar a temporada ${esc(S.E.serie.temporada || '1')} do TMDB</button>
           ${(S.E.serie.temporadas || []).length > 1 ? `<button class="btn-sec importar-grande" id="hero-todas">${ic('camadas')} Importar várias ou todas (${S.E.serie.temporadas.length})</button>` : ''}</div>` : '<div id="hero-busca"></div>'}
-        <span class="inicio-ou">Ou comece por outra fonte:</span>
+        <div class="inicio-recentes" id="inicio-recentes"></div>
+        <span class="inicio-ou">Ou comece por outra fonte</span>
         <div class="fontes">
           <button class="fonte" data-clicar="imp-wiki">${ic('globo')}<b>Wiki (Fandom)</b><span>Quando o TMDB não tem sinopse</span></button>
           <button class="fonte verde" data-clicar="imp-tvdb">${ic('banco')}<b>TVDB</b><span>Pela numeração do TVDB</span></button>
           <button class="fonte" data-clicar="imp-lote">${ic('camadas')}<b>Lote</b><span>Várias séries e temporadas de uma vez</span></button>
           <div class="fonte verde" role="button" tabindex="0" data-clicar="imp-planilha">${ic('tabela')}<b>Planilha</b><span>Abrir um arquivo CSV</span><a href="#" data-modelo>Baixar modelo vazio</a></div>
-        </div>
-        <div class="inicio-recentes" id="inicio-recentes"></div></div>`;
+        </div></div>`;
       if (escolhida) { $('#hero-tmdb', rol).onclick = () => $('#imp-tmdb').click(); const t = $('#hero-todas', rol); if (t) t.onclick = importarTemporadas; }
       else $('#hero-busca', rol).appendChild($('.busca'));
       $$('[data-clicar]', rol).forEach((c) => c.onclick = () => $('#' + c.dataset.clicar).click());
       $('[data-modelo]', rol).onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); $('#btn-modelo').click(); };
       preencherInicio();
     } else if (!vis.length) {
-      const tudo = S.filtro === 'pendentes' && feitos > 0;
+      const tudo = S.filtro === 'pendentes' && feitos > 0 && !S.buscaLista;
       if (tudo) {
         const enviados = eps.filter((e) => e.situacao === 'Enviado').length;
         const ja = eps.filter((e) => e.situacao === 'Já preenchido').length;
@@ -635,8 +638,30 @@
     $$('.trava').forEach((b) => { b.disabled = valor; });
     $('#btn-parar').hidden = !valor;
     $('#btn-enviar').hidden = valor;
+    $('#andamento').hidden = !valor;
+    if (valor) mostrarAndamento('Trabalhando...', '', null);
+    if (!valor && document.body.classList.contains('carregando')) { document.body.classList.remove('carregando'); renderLista(); }
     if (!valor) { $('#prog-txt').dataset.fixo = '1'; setTimeout(() => { $('#prog-txt').dataset.fixo = ''; }, 6000); }
     renderRodape();
+  }
+
+  // Andamento da tarefa ao lado do botão Parar (o rodapé antigo fica escondido).
+  function mostrarAndamento(texto, numeros, fracao) {
+    const caixa = $('#andamento');
+    caixa.title = texto + (numeros ? ' · ' + numeros : '');
+    $('#and-txt').textContent = texto;
+    $('#and-num').textContent = numeros;
+    caixa.classList.toggle('indeterminado', fracao == null);
+    $('#and-barra').style.width = fracao == null ? '' : `${Math.round(fracao * 100)}%`;
+  }
+
+  function mostrarCarregando() {
+    if (document.body.classList.contains('carregando')) return;
+    document.body.classList.add('carregando');
+    document.body.classList.remove('sem-lista', 'serie-vazia');
+    // A busca grande mora dentro da tela inicial: guarda ela antes de trocar o conteúdo.
+    $('.busca-casa').appendChild($('.busca'));
+    $('#rolagem').innerHTML = `<div class="esqueleto" aria-label="Carregando episódios">${'<div class="esq-linha"><i></i><span><b></b><em></em></span><u></u></div>'.repeat(9)}</div>`;
   }
 
   // Etapas no topo (opcional): mostram em que ponto do trabalho a lista está.
@@ -732,6 +757,9 @@
             $('#trilha-barra').style.width = `${Math.round((ev.atual / ev.total) * 100)}%`;
             $('#prog-seg').textContent = `${ev.atual} de ${ev.total}` + tempoRestante(ev);
           }
+          mostrarAndamento(ev.texto || 'Trabalhando...', $('#prog-seg').textContent, ev.total ? ev.atual / ev.total : null);
+          // Lista vazia e algo sendo importado: linhas de carregamento no lugar da tela inicial.
+          if (!S.E.episodios.length && S.E.ocupado && !ev.total && /import|carregando|lendo|abrindo|buscando|lote|série \d+ de/i.test(ev.texto || '')) mostrarCarregando();
           break;
         }
         case 'log': registrar(ev.texto); break;
@@ -852,9 +880,12 @@
   // Depois de colar: confere se veio tudo e já mostra o próximo passo.
   function aposColar(r) {
     if (!r || r.cancelado) return;
-    resultado(r);
+    // Colou tudo: a notificação com o próximo passo já avisa, sem outro aviso por cima.
+    if (!r.ok || r.partes || r.faltam?.length) resultado(r); else registrar(r.texto);
     if (!r.ok) return;
     if (r.partes) abrirPartes();
+    else if (!r.faltam?.length) notificar('Tradução colada', 'Próximo passo: revisar e enviar.', 'ok', 12000,
+      [{ txt: 'Enviar', fn: enviar }, { txt: 'Revisar lado a lado', fn: abrirLadoALado }]);
     if (r.faltam?.length) {
       modal({ icone: 'alerta', alerta: true, estreito: true, titulo: r.texto,
         texto: `Faltaram: <b>${r.faltam.slice(0, 30).map((f) => esc(f.rotulo)).join(', ')}${r.faltam.length > 30 ? '...' : ''}</b>. O que veio já foi guardado.`,
@@ -1328,12 +1359,12 @@
     let r;
     try { r = await chamar('minhas_series'); } catch (_) { return; }
     const caixa = $('#inicio-recentes');
-    const lista = (r.series || []).slice(0, 4);
+    const lista = (r.series || []).slice(0, 5);
     if (!caixa || !lista.length) return;
-    caixa.innerHTML = `<span class="recentes-rot">CONTINUAR DE ONDE PAROU</span><div class="inicio-cartoes">` + lista.map((s) => {
+    caixa.innerHTML = `<span class="recentes-rot">Continuar de onde parou</span><div class="inicio-cartoes">` + lista.map((s) => {
       const t = s.temporadas[s.temporadas.length - 1];
       return `<button class="inicio-cartao" data-codigo="${esc(s.codigo)}" data-temp="${esc(t.numero)}">
-        <span class="inicio-poster" aria-hidden="true">${ic('filme')}</span>
+        <span class="inicio-poster" aria-hidden="true">${s.poster ? `<img src="${esc(s.poster)}" alt="" loading="lazy" decoding="async">` : esc(iniciais(s.nome))}</span>
         <span class="inicio-txt"><b>${esc(s.nome)}</b><small>Temporada ${esc(t.numero)} · ${t.enviados} enviados</small></span></button>`;
     }).join('') + '</div>';
     $$('.inicio-cartao', caixa).forEach((b) => b.onclick = async () => resultado(await chamar('abrir_serie', b.dataset.codigo, b.dataset.temp)));
@@ -1369,6 +1400,8 @@
       botoes: [{ txt: 'Fechar', cls: 'btn-pri' }] });
   }
 
+  const iniciais = (nome) => (nome || '?').split(/\s+/).filter((p) => /^[\p{L}\d]/u.test(p)).slice(0, 2).map((p) => p[0].toUpperCase()).join('');
+
   async function abrirMinhasSeries() {
     const r = await chamar('minhas_series');
     const n = await chamar('estatisticas');
@@ -1379,12 +1412,13 @@
         <div class="numero"><b>${n.tvdb}</b><span>no TVDB</span></div></div>`;
     const data = (q) => q ? q.slice(8, 10) + '/' + q.slice(5, 7) + '/' + q.slice(0, 4) : '';
     const cartao = (s) => `<div class="serie-cartao" data-codigo="${esc(s.codigo)}" data-nome="${esc((s.nome || '').toLowerCase())}">
-        ${s.poster ? `<img class="poster-g" src="${esc(s.poster)}" alt="">` : '<div class="poster-g" aria-hidden="true"></div>'}
+        ${s.poster ? `<img class="poster-g" src="${esc(s.poster)}" alt="" loading="lazy">` : `<div class="poster-g iniciais" aria-hidden="true">${esc(iniciais(s.nome))}</div>`}
         <div class="serie-info"><div><b class="serie-nome">${esc(s.nome || 'Série do TVDB')}</b><small>Último envio ${data(s.ultimo)}</small></div>
         <div class="serie-temps">${s.temporadas.map((t) => `<button class="temp-chip" data-temp="${esc(t.numero)}" ${s.codigo ? '' : 'disabled'} title="Escolher esta temporada">
           <b>T${esc(t.numero)}</b> <span>${t.enviados} enviados</span></button>`).join('')}</div>
-        ${r.tem_chave && s.codigo ? `<div class="linha-flex"><button class="btn-azul pequeno btn-mudancas" title="Ver se alguém mudou ou apagou o que você enviou">${ic('repetir')} Conferir mudanças</button>
-            <button class="btn-azul pequeno btn-cobertura">${ic('globo')} Quanto falta no TMDB</button></div>` : ''}
+        ${r.tem_chave && s.codigo ? `<div class="menu cartao-menu"><button class="btn-acao quadrado" data-menu aria-label="Mais opções de ${esc(s.nome)}" title="Mais opções">⋯</button>
+          <div class="menu-lista direita"><button class="btn-mudancas">${ic('repetir')}Conferir mudanças no TMDB</button>
+          <button class="btn-cobertura">${ic('globo')}Quanto falta no TMDB</button></div></div>` : ''}
         <div class="serie-cob"></div></div></div>`;
     const { fundo, fechar } = modal({ pagina: 'btn-minhas', icone: 'filme', titulo: 'Minhas séries',
       texto: 'Tudo o que você já enviou. Clique numa temporada para continuar de onde parou.',
@@ -1719,6 +1753,11 @@
     $('#btn-copiar').onclick = () => abrirPartes();
     $('#btn-colar').onclick = async () => aposColar(await chamar('colar'));
     $('#btn-partes').onclick = () => abrirPartes();
+    let tempoListaBusca = null;
+    $('#busca-lista').addEventListener('input', (ev) => {
+      clearTimeout(tempoListaBusca);
+      tempoListaBusca = setTimeout(() => { S.buscaLista = ev.target.value; S.recolhidos.clear(); renderLista(); }, 150);
+    });
     $('#btn-recolher-todas').onclick = () => {
       const chaves = [...grupos(S.E.episodios).keys()];
       if (chaves.every((k) => S.recolhidos.has(k))) S.recolhidos.clear(); else chaves.forEach((k) => S.recolhidos.add(k));

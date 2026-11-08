@@ -18,7 +18,7 @@ import nucleo
 from automatizador import STORAGE
 from instrucoes import ARQUIVO_INSTRUCOES, PROMPT_PADRAO, carregar_instrucoes
 
-VERSAO = "1.5"
+VERSAO = "1.6"
 FINALIZADOS = ("Enviado", "Já preenchido")
 INCOMPLETOS = ("Sem texto", "Sem sinopse")
 ARQUIVO_HISTORICO = nucleo.PASTA / "historico_envios.json"
@@ -65,7 +65,7 @@ def gravar_serie(codigo, nome="", **campos):
     if nome:
         item["nome"] = nome
     item.update(campos)
-    ARQUIVO_SERIES.write_text(json.dumps(dados, ensure_ascii=False, indent=1), encoding="utf-8")
+    nucleo.gravar_texto(ARQUIVO_SERIES, json.dumps(dados, ensure_ascii=False, indent=1))
 
 
 class Api:
@@ -119,7 +119,7 @@ class Api:
         dados = {"versao": VERSAO, "serie": self.serie, "idioma": self.idioma,
                  "episodios": self.episodios}
         try:
-            nucleo.ARQUIVO_TRABALHO.write_text(json.dumps(dados, ensure_ascii=False), encoding="utf-8")
+            nucleo.gravar_texto(nucleo.ARQUIVO_TRABALHO, json.dumps(dados, ensure_ascii=False))
         except OSError:
             pass
 
@@ -232,7 +232,7 @@ class Api:
             historico.append(registro)
             del historico[:-LIMITE_HISTORICO]
             try:
-                ARQUIVO_HISTORICO.write_text(json.dumps(historico, ensure_ascii=False), encoding="utf-8")
+                nucleo.gravar_texto(ARQUIVO_HISTORICO, json.dumps(historico, ensure_ascii=False))
             except OSError:
                 pass
 
@@ -1425,7 +1425,7 @@ class Api:
         return {"texto": carregar_instrucoes(), "padrao": PROMPT_PADRAO}
 
     def salvar_instrucoes(self, texto):
-        ARQUIVO_INSTRUCOES.write_text((texto or "").strip(), encoding="utf-8")
+        nucleo.gravar_texto(ARQUIVO_INSTRUCOES, (texto or "").strip())
         return {"ok": True}
 
     # =============================================================== envio
@@ -1582,7 +1582,7 @@ class Api:
         arquivo = self._pasta_trabalhos() / (_re.sub(r'[\\/:*?"<>|]+', "_", nome)[:80] + ".json")
         dados = {"nome": nome, "salvo_em": _time.strftime("%Y-%m-%d %H:%M"), "versao": VERSAO,
                  "serie": self.serie, "idioma": self.idioma, "episodios": self.episodios}
-        arquivo.write_text(json.dumps(dados, ensure_ascii=False, indent=1), encoding="utf-8")
+        nucleo.gravar_texto(arquivo, json.dumps(dados, ensure_ascii=False, indent=1))
         return {"ok": True, "texto": f"Trabalho “{nome}” salvo."}
 
     def abrir_trabalho(self, arquivo):

@@ -859,3 +859,161 @@ body.compacta .ep.saindo { padding-top: 4px; padding-bottom: 4px; }
 .conf-item summary { cursor: pointer; color: var(--link); font-weight: 600; }
 .conf-dif { padding: 6px 0; border-top: 1px solid var(--linha); color: var(--apagado); line-height: 1.45; }
 .conf-dif b { color: var(--texto); margin-right: 4px; }
+
+
+/* ====================== 1.6: refino depois da crítica de 07/11 ====================== */
+/* Fundos com mais diferença entre os níveis; botões sem borda, com fundo próprio. */
+:root {
+  --fundo: #08111D; --painel: #0F1C2E; --painel-2: #0C1726; --cartao: #13233A; --elevado: #1B2D46; --campo: #0B1524;
+  --linha: #1A2A40; --borda: #22354F; --botao: #17293F; --botao-hover: #20354F; --sel: #13263E;
+  --ver: #FF8A7A; --ver-f: #3E1A1A; --link: #DCE6F0;
+}
+body.claro {
+  --fundo: #F1F4F7; --painel: #FFFFFF; --painel-2: #F6F8FA; --cartao: #FFFFFF; --elevado: #E9EEF3; --campo: #F7F9FB;
+  --linha: #E1E6EC; --borda: #D3DBE4; --botao: #EDF1F5; --botao-hover: #E1E7EE; --sel: #E8F6FC;
+  --ver: #B42318; --ver-f: #FDE8E6; --link: #142033;
+}
+
+/* Situações: uma cor para cada uma, sempre com o nome escrito. */
+body .selo { border-radius: 6px; }
+body .selo.s-Original, body .selo.s-Sem { background: var(--cin-f); color: var(--apagado); }
+body .selo.s-Traduzido, body .selo.s-Complementado, body .selo.s-Enviando { background: var(--azul-f); color: var(--azul); }
+body .selo.s-Editado { background: var(--ama-f); color: var(--ama); }
+body .selo.s-Enviado, body .selo.s-Ja { background: var(--ok-f); color: var(--ok); }
+body .selo.s-Falhou { background: var(--ver-f); color: var(--ver); }
+body .selo-falha { background: var(--ver-f) !important; color: var(--ver) !important; }
+
+/* Ciano cheio só no botão principal, na seleção e nas chaves ligadas. */
+a, body.claro a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--borda); }
+a:hover { text-decoration-color: currentColor; }
+.chip-link { color: var(--texto-2); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--borda); }
+.chip-link:hover { color: var(--texto); }
+.fonte-tag, body.claro .fonte-tag, .fonte-tag.fonte-tmdb, .fonte-tag.fonte-tvdb, .fonte-tag.fonte-wiki { background: transparent; color: var(--apagado); padding: 0; font-weight: 600; }
+.barrinha div { background: var(--ok); }
+.insp-abas button[aria-selected="true"] { border-bottom-color: var(--texto); }
+.btn-azul, body.claro .btn-azul { background: var(--botao); border: 0; color: var(--texto); }
+.btn-azul:hover { background: var(--botao-hover); }
+.contador { color: var(--apagado); }
+.contador.alerta { color: var(--ama); } .contador.excesso { color: var(--ver); }
+
+/* Menos bordas: só campos, painéis grandes, janelas e cartões têm contorno. */
+.btn-acao, .btn-mini, .btn-sec, .btn-icone, .chip, select.chip, .etq, .temp-chip, .fechar, .insp-rodape button, .btn-contorno,
+body.claro .btn-mini, body.claro .btn-sec, body.claro .btn-icone, body.claro .chip, body.claro .etq, body.claro .temp-chip,
+body.claro .fechar, body.claro .insp-rodape button {
+  border: 0; background: var(--botao); color: var(--texto); border-radius: 8px; }
+.btn-acao:hover, .btn-mini:hover, .btn-sec:hover, .btn-icone:hover, .temp-chip:hover, .fechar:hover, .insp-rodape button:hover { background: var(--botao-hover); }
+.etq, body.claro .etq { border-radius: 6px; font-weight: 500; color: var(--texto-2); }
+.btn-pri, .btn-enviar, body.claro .btn-pri, body.claro .btn-enviar { border-radius: 8px; }
+.entrada, textarea.entrada { border-color: var(--borda); }
+
+/* Escala de letras: 12, 13, 15, 20 e 28. */
+.serie-titulo h1 { font-size: 26px; letter-spacing: -0.02em; }
+.serie-titulo span { font-size: 13px; }
+.ep .txt b { font-size: 15px; font-weight: 600; }
+.ep .txt > span { font-size: 13px; }
+.grupo-cab .grupo-linha b { font-size: 13px; font-weight: 600; color: var(--texto-2); }
+.insp-cab h2 { font-size: 20px; }
+.pagina .modal-cab h2 { font-size: 28px; letter-spacing: -0.02em; }
+
+/* Topo numa faixa só: série à esquerda, ações à direita. */
+.principal { gap: 14px; }
+.topo, body.claro .topo { align-items: center; gap: 20px; }
+.serie-atual { min-width: 0; }
+.serie-titulo h1 { min-width: 0; }
+.topo .acoes { flex-shrink: 0; gap: 8px; }
+.btn-acao, .btn-enviar, body.claro .btn-enviar { height: 40px; }
+.busca-casa { top: 92px; }
+@media (max-width: 1300px) {
+  .topo .acoes #btn-copiar span, .topo .acoes #btn-colar span { display: none; }
+  .topo .acoes #btn-copiar, .topo .acoes #btn-colar { width: 40px; padding: 0; justify-content: center; }
+}
+
+/* Contas TMDB e TVDB na lateral, como linhas discretas. */
+.trilho .topo-direita { flex-direction: column; align-items: stretch; gap: 0; margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--linha); align-self: stretch; }
+.trilho .conta, body.claro .trilho .conta { height: 34px; width: 100%; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; justify-content: flex-start; }
+.trilho .conta:hover { background: var(--elevado); }
+.trilho .conta-txt { font-size: 13px; gap: 8px; width: 100%; justify-content: space-between; }
+.trilho .conta-txt b { font-weight: 500; color: var(--apagado); }
+.trilho .conta-txt small { font-size: 12px; }
+
+/* Lista: alvos maiores; enviado continua legível. */
+.filtros button, body.claro .filtros button { height: 34px; }
+input[type="checkbox"] { width: 18px; height: 18px; }
+input.chave { width: 42px; height: 24px; }
+.chips { flex-wrap: nowrap; }
+.chips > * { white-space: nowrap; flex-shrink: 0; }
+@media (max-width: 1520px) { .salvo-auto { display: none; } }
+.ep.feito { opacity: 1; }
+.ep.feito .txt b { color: var(--texto-2); font-weight: 500; }
+
+/* Início: ícone pequeno acima do título, sem invadir o texto. */
+.fonte { gap: 6px; min-height: 0; padding: 18px; }
+.fonte svg.i { position: static; transform: none; width: 22px; height: 22px; stroke-width: 1.8; opacity: 1; margin-bottom: 6px; }
+.fonte b, .fonte span, .fonte a { position: static; }
+
+/* Minhas séries: iniciais quando não há pôster; ferramentas no menu ⋯. */
+.poster-g.iniciais { display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; color: var(--apagado); letter-spacing: 0.02em; }
+.pagina .serie-cartao { position: relative; }
+.cartao-menu { position: absolute; top: 12px; right: 12px; }
+.cartao-menu .btn-acao.quadrado { width: 36px; height: 36px; background: transparent; }
+.cartao-menu .btn-acao.quadrado:hover { background: var(--botao-hover); }
+
+/* Logo: tela com duas linhas de legenda. */
+.logo, body.lateral-aberta .marca .logo { background: #01B4E4; color: #08111D; }
+.logo svg.i { stroke-width: 0; }
+
+/* Tela inicial: busca, séries recentes com pôster e outras fontes compactas. */
+.inicio { gap: 22px; }
+.inicio-recentes { max-width: none; margin-top: 4px; gap: 12px; }
+.inicio-recentes:empty { display: none; }
+.recentes-rot { padding: 0; font-size: 13px; letter-spacing: 0; text-transform: none; font-weight: 600; color: var(--texto-2); }
+.inicio-cartoes { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.inicio-cartao, body.claro .inicio-cartao { flex-direction: column; align-items: stretch; gap: 10px; padding: 0; border: 0; background: transparent; }
+.inicio-cartao:hover { transform: none; border: 0; }
+.inicio-cartao:hover .inicio-poster { outline: 2px solid var(--destaque); outline-offset: 2px; }
+.inicio-poster { width: 100%; height: auto; aspect-ratio: 2 / 3; border-radius: 8px; background: var(--cartao); color: var(--apagado); font-size: 24px; font-weight: 700; overflow: hidden; }
+.inicio-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.inicio-txt b { font-size: 14px; }
+.inicio-ou { margin-top: 6px; font-size: 13px; font-weight: 600; color: var(--texto-2); }
+.fontes { margin-top: -10px; gap: 10px; }
+.fonte { flex-direction: row; align-items: center; gap: 12px; padding: 12px 14px; flex-wrap: wrap; }
+.fonte svg.i { margin: 0; flex-shrink: 0; }
+.fonte b { font-size: 14px; }
+.fonte span { flex-basis: 100%; font-size: 12px; margin-top: -4px; }
+.fonte a { flex-basis: 100%; font-size: 12px; margin-top: -4px; }
+
+/* Andamento da tarefa no topo, no lugar do rodapé. */
+body.tarefa .rodape { display: none; }
+.andamento { display: flex; flex-direction: column; justify-content: center; gap: 5px; width: 260px; height: 40px; padding: 0 12px; border-radius: 8px; background: var(--botao); position: relative; overflow: hidden; }
+.and-txt { font-size: 12px; color: var(--texto); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 64px; }
+.and-num { position: absolute; right: 12px; top: 7px; font-size: 12px; color: var(--apagado); white-space: nowrap; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.and-trilha { display: block; height: 4px; border-radius: 2px; background: var(--trilha); overflow: hidden; position: relative; contain: layout paint; }
+.and-trilha b { display: block; height: 100%; width: 0; background: var(--destaque); border-radius: 2px; transition: width .35s; }
+.andamento.indeterminado .and-trilha b { width: 30%; animation: vai 1.2s ease-in-out infinite; }
+
+/* Linhas de carregamento enquanto a lista chega. */
+body.carregando .lista-topo { visibility: hidden; }
+.esqueleto { display: flex; flex-direction: column; }
+.esq-linha { display: flex; align-items: center; gap: 14px; padding: 16px; border-bottom: 1px solid var(--linha); }
+.esq-linha i, .esq-linha b, .esq-linha em, .esq-linha u { display: block; border-radius: 5px; background: var(--elevado); animation: piscar 1.4s ease-in-out infinite; }
+.esq-linha i { width: 18px; height: 18px; }
+.esq-linha span { flex-grow: 1; display: flex; flex-direction: column; gap: 8px; }
+.esq-linha b { width: 40%; height: 12px; }
+.esq-linha em { width: 75%; height: 10px; }
+.esq-linha u { width: 72px; height: 22px; }
+@keyframes piscar { 0%, 100% { opacity: .45; } 50% { opacity: .9; } }
+
+/* Notificação com o próximo passo. */
+.noti-acoes { display: flex; gap: 8px; margin-top: 10px; }
+.noti-acoes button { height: 32px; padding: 0 12px; font-size: 13px; min-width: 0; }
+
+/* Busca dentro da lista. */
+.busca-lista { height: 34px; width: 200px; font-size: 13px; order: -1; margin-right: 6px; }
+
+/* A linha de filtros não quebra; a busca encolhe quando falta espaço. */
+.filtros button, .lista-topo .btn-mini { white-space: nowrap; }
+.busca-lista { flex: 0 1 200px; min-width: 110px; width: auto; }
+.serie-atual > div { overflow: hidden; }
+/* Durante uma tarefa, Copiar e Colar ficam só com o ícone para caber o andamento. */
+body.tarefa .topo .acoes #btn-copiar span, body.tarefa .topo .acoes #btn-colar span { display: none; }
+body.tarefa .topo .acoes #btn-copiar, body.tarefa .topo .acoes #btn-colar { width: 40px; padding: 0; justify-content: center; }
