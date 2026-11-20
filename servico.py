@@ -18,7 +18,7 @@ import nucleo
 from automatizador import STORAGE
 from instrucoes import ARQUIVO_INSTRUCOES, PROMPT_PADRAO, carregar_instrucoes
 
-VERSAO = "1.6.2"
+VERSAO = "1.7"
 FINALIZADOS = ("Enviado", "Já preenchido")
 INCOMPLETOS = ("Sem texto", "Sem sinopse")
 ARQUIVO_HISTORICO = nucleo.PASTA / "historico_envios.json"
@@ -66,6 +66,17 @@ def gravar_serie(codigo, nome="", **campos):
         item["nome"] = nome
     item.update(campos)
     nucleo.gravar_texto(ARQUIVO_SERIES, json.dumps(dados, ensure_ascii=False, indent=1))
+
+
+_ESTRANHO = re.compile(
+    r"NOMES ADAPTADOS|FIM DOS NOMES|NOMES EM LOTE|T[íi]tulo\s*:|Sinopse\s*:|```|===|"
+    r"\[(?:\d+-)?T?\d+(?:-E\d+)?\]|bloco de c[óo]digo|marca de epis[óo]dio|^\s*- ", re.I | re.M)
+
+
+def _texto_estranho(texto):
+    """Trecho de instrução ou de formato que vazou para o texto (ou "" se não houver)."""
+    achado = _ESTRANHO.search(texto or "")
+    return achado.group(0).strip() if achado else ""
 
 
 class Api:
@@ -164,6 +175,7 @@ class Api:
         self._avisar_tela("ocupado", valor=True)
 
         def rodar():
+            nucleo.limpar_cache()
             try:
                 rotina(*args)
             except nucleo.ErroAPI as erro:
@@ -390,7 +402,9 @@ class Api:
                 "nomes_adaptados": bool(c.get("nomes_adaptados", True)),
                 "desmarcar_portugues": bool(c.get("desmarcar_portugues", True)),
                 "copiar_partes": bool(c.get("copiar_partes", True)),
-                "tamanho_parte": int(c.get("tamanho_parte", 30))}
+                "tamanho_parte": int(c.get("tamanho_parte", 30)),
+                "barrar_sem_traducao": bool(c.get("barrar_sem_traducao", True)),
+                "aviso_fim": bool(c.get("aviso_fim", True))}
 
     def _com_temporada(self):
         """Opção (desligada por padrão): importar também a sinopse da temporada."""
@@ -408,8 +422,11 @@ class Api:
                       conferir_prefixo=True, revisar_envio=True, analisar_idiomas=True,
                       pagina_serie=True, atualizacoes=True, usar_tvdb=True,
                       confirmar_fechar=True, copiar_partes=True, tamanho_parte=30,
-                      nomes_adaptados=True, desmarcar_portugues=True):
+                      nomes_adaptados=True, desmarcar_portugues=True,
+                      barrar_sem_traducao=True, aviso_fim=True):
         c = nucleo.ler_config()
+        c["barrar_sem_traducao"] = bool(barrar_sem_traducao)
+        c["aviso_fim"] = bool(aviso_fim)
         c["desmarcar_portugues"] = bool(desmarcar_portugues)
         c["nomes_adaptados"] = bool(nomes_adaptados)
         c["copiar_partes"] = bool(copiar_partes)
@@ -844,6 +861,21 @@ class Api:
                 if wiki and not tvdb and len(pedidas) != 1:
                     problemas.append(f"{s['nome']}: o link da Wiki só vale para uma "
                                      "temporada; usei o TMDB")
+                api = nucleo.tmdb_configurado()
+                if api and not tvdb and not (wiki and len(pedidas) == 1) and len(pedidas) > 1:
+                    # Só adianta a busca dos dados (fica guardada); a montagem segue em ordem.
+                    self._avisar_tela("progresso", atual=0, total=0,
+                                      texto=f"{lote} · {s['nome']} · buscando {len(pedidas)} temporadas...")
+                    from concurrent.futures import ThreadPoolExecutor
+
+                    def adiantar(par):
+                        try:
+                            api.temporada(codigo, par[0], par[1])
+                        except Exception:
+                            pass
+                    with ThreadPoolExecutor(max_workers=6) as grupo_t:
+                        list(grupo_t.map(adiantar, [(t, l) for t in pedidas
+                                                    for l in dict.fromkeys(("en-US", self.idioma))]))
                 for temporada in pedidas:
                     if self._parar:
                         break
@@ -1143,6 +1175,15 @@ class Api:
                 ordem.append(g)
         self.episodios.sort(key=lambda e: (ordem.index((e["codigo"], e["temporada"])), e["numero"]))
 
+    def voltar_inicio(self):
+        """Tira a série escolhida (lista vazia) e volta para a tela inicial."""
+        if self.episodios:
+            return {"erro": "A lista tem episódios. Use “Começar outra” para limpar."}
+        self.serie = {"codigo": "", "nome": "", "ano": "", "poster": "", "temporadas": [],
+                      "temporada": "1"}
+        self._publicar()
+        return self._estado()
+
     def limpar(self):
         self._trocar_lista([])
         return self._estado()
@@ -1401,6 +1442,10 @@ class Api:
             return s == os_
         return bool(t and ot and t == ot and len(t.split()) > 1)
 
+    @staticmethod
+    def _barrar_ingles():
+        return bool(nucleo.ler_config().get("barrar_sem_traducao", True))
+
     def colar(self):
         if not self.episodios:
             return {"erro": "Importe os textos originais antes de colar a tradução."}
@@ -1463,6 +1508,7 @@ class Api:
         (marcados com "so_tvdb")."""
         padrao = self._grupo_atual()
         itens, sem_codigo = [], 0
+        self._barrados = []
         for e in self.episodios:
             titulo = "" if nucleo.provisorio(e["titulo"]) else (nucleo.valor_valido(e["titulo"]) or "")
             sinopse = "" if nucleo.provisorio(e["sinopse"]) else (nucleo.valor_valido(e["sinopse"]) or "")
@@ -1471,8 +1517,11 @@ class Api:
                        and e.get("tipo", "episodio") == "episodio")
             if not (e["enviar"] or so_tvdb) or not (titulo or sinopse):
                 continue
-            # "Traduzido" com o texto igual ao original: a tradução não veio, não envia.
-            if e.get("situacao") == "Traduzido" and self._sem_traducao(e, titulo, sinopse):
+            # Texto igual ao original: a tradução não veio, não envia.
+            if self._sem_traducao(e, titulo, sinopse) and (
+                    e.get("situacao") == "Traduzido" or self._barrar_ingles()):
+                if not so_tvdb:
+                    self._barrados.append(self._rotulo(e))
                 continue
             codigo = e["codigo"] or padrao["codigo"]
             if not str(codigo).isdigit():
@@ -1495,6 +1544,7 @@ class Api:
         if not STORAGE.exists():
             return {"precisa_login": True}
         itens, sem_codigo = self._para_enviar()
+        barrados = list(self._barrados)
         grupos = {}
         existentes = {"titulo": 0, "sinopse": 0}
         conhecidos = 0
@@ -1533,6 +1583,7 @@ class Api:
                                   "deslocamento": salvo.get("deslocamento", 0)})
         config = nucleo.ler_config()
         return {"total": len(itens), "sem_codigo": sem_codigo, "idioma": self.idioma,
+                "barrados": barrados,
                 "tvdb": {"ligado": bool(config.get("enviar_tvdb", False)),
                          "logado": nucleo.STORAGE_TVDB.exists(),
                          "idioma_ok": self.idioma in nucleo.IDIOMA_TVDB,
@@ -1567,6 +1618,9 @@ class Api:
                 achados.append("título igual ao original (não traduzido?)")
             if s and os_ and s == os_:
                 achados.append("sinopse igual à original (não traduzida?)")
+            estranho = _texto_estranho(t + "\n" + s)
+            if estranho:
+                achados.append(f"texto que não é da sinopse: “{estranho}”")
             if len(s) > limite:
                 achados.append(f"sinopse longa ({len(s)} de {limite} caracteres)")
             m = re.match(r"^\s*[^\W\d_]+(?:[ .][^\W\d_]+)?[ .]?#?(\d+)\s*[:.\-–—]", t)
@@ -1774,7 +1828,12 @@ class Api:
         return {"ok": self._em_segundo_plano(rotina)}
 
     def ler_historico(self):
-        return {"registros": list(reversed(self._ler_historico_arquivo()))[:1000]}
+        regs = list(reversed(self._ler_historico_arquivo()))[:1000]
+        for h in regs:  # cópias lidas do arquivo: marcar aqui não altera o histórico salvo
+            depois = h.get("depois") or {}
+            h["problema"] = _texto_estranho((depois.get("titulo") or "") + "\n" + (depois.get("sinopse") or "")) \
+                if h.get("tipo", "envio") == "envio" else ""
+        return {"registros": regs}
 
     def desfazer(self, ids):
         """Devolve ao TMDB ou ao TVDB o texto que havia antes dos envios escolhidos."""

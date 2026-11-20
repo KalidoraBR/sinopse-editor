@@ -1017,3 +1017,49 @@ body.carregando .lista-topo { visibility: hidden; }
 /* Durante uma tarefa, Copiar e Colar ficam só com o ícone para caber o andamento. */
 body.tarefa .topo .acoes #btn-copiar span, body.tarefa .topo .acoes #btn-colar span { display: none; }
 body.tarefa .topo .acoes #btn-copiar, body.tarefa .topo .acoes #btn-colar { width: 40px; padding: 0; justify-content: center; }
+
+
+/* 1.6.3 — série escolhida sem lista: tela enxuta */
+.inicio-serie { max-width: 520px; margin: 14vh auto 0; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.inicio-serie h2 { font-size: 22px; font-weight: 700; margin: 0; }
+.inicio-serie p { margin: 0 0 10px; color: var(--apagado); font-size: 14px; }
+.inicio-serie-botoes { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.inicio-serie-botoes .importar-grande { width: auto; padding: 0 22px; }
+.inicio-serie-outras { margin-top: 18px; font-size: 13px; color: var(--apagado); display: flex; gap: 8px; align-items: center; }
+.inicio-serie-outras .link { background: none; border: 0; padding: 2px; color: var(--link, var(--texto)); font: inherit; cursor: pointer; }
+.inicio-serie-outras .link:hover { text-decoration: underline; }
+/* Andamento: texto e números lado a lado, sem se sobrepor */
+.andamento { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; row-gap: 5px; align-content: center; }
+.and-txt { padding-right: 0; }
+.and-num { position: static; max-width: none; }
+.andamento .and-trilha { grid-column: 1 / -1; }
+
+/* 1.6.3 — voltar ao início e lista da busca */
+.voltar-inicio { margin: 20px 0 0 24px; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 8px; background: transparent; border: 1px solid var(--borda); color: var(--apagado); font: inherit; font-size: 13px; cursor: pointer; }
+.voltar-inicio:hover { color: var(--texto); background: var(--botao); }
+.voltar-inicio svg { width: 16px; height: 16px; }
+.resultados { top: calc(100% + 6px); max-height: 360px; overflow-y: auto; padding: 4px; }
+.resultados .resultado { border-radius: 8px; }
+.resultados .resultado:hover, .resultados .resultado:focus-visible { background: var(--botao); }
+
+/* 1.7 — resumo, pôster, histórico, início */
+.poster-iniciais { font-size: 15px; font-weight: 700; color: var(--apagado); letter-spacing: .5px; }
+.insp-resumo { padding: 28px 24px; display: flex; flex-direction: column; gap: 16px; }
+.insp-resumo-rot { font-size: 12px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--apagado); }
+.resumo-barra { display: flex; height: 8px; border-radius: 99px; background: var(--botao); overflow: hidden; }
+.resumo-barra .r-env { background: #3fb950; }
+.resumo-barra .r-pro { background: var(--destaque, #01b4e4); }
+.resumo-num { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.resumo-num div { display: flex; flex-direction: column; gap: 2px; padding: 12px; border-radius: 10px; background: var(--botao); }
+.resumo-num b { font-size: 22px; font-weight: 700; }
+.resumo-num span { font-size: 12px; color: var(--apagado); }
+.insp-resumo p { margin: 0; font-size: 13px; color: var(--apagado); line-height: 1.5; }
+.hist-prob { display: block; font-size: 12px; color: #ff8a80; margin-top: 4px; }
+.nota.erro { background: rgba(255, 82, 82, .1); border: 1px solid rgba(255, 82, 82, .35); color: #ffb4ab; }
+/* Cartões de "Continuar de onde parou" menores, numa linha só */
+.inicio-cartoes { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; }
+.inicio-cartao { width: 112px; flex: none; }
+/* 1.7 — cartões: contorno de seleção sem corte e pôster maior */
+.inicio-cartoes { padding: 4px; margin: -4px; }
+.inicio-cartao { width: 140px; }
+#poster { width: 52px; height: 76px; border-radius: 8px; overflow: hidden; }

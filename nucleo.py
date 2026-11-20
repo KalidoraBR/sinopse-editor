@@ -237,6 +237,17 @@ class ErroAPI(Exception):
     pass
 
 
+# Respostas do TMDB lembradas por alguns minutos: a mesma importação pede os mesmos
+# dados várias vezes. Cada tarefa nova começa do zero (limpar_cache), para nunca mostrar
+# o que havia antes de um envio.
+_CACHE = {}
+_CACHE_TEMPO = 300
+
+
+def limpar_cache():
+    _CACHE.clear()
+
+
 class TMDB:
     """Leitura de dados pela API oficial do TMDB (pôsteres, nomes, episódios).
 
@@ -254,10 +265,15 @@ class TMDB:
         else:
             params["api_key"] = self.chave
         url = f"{self.BASE}{caminho}?{urllib.parse.urlencode(params)}"
+        guardado = _CACHE.get(url)
+        if guardado and time.time() - guardado[0] < _CACHE_TEMPO:
+            return guardado[1]
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=cabecalhos),
                                         timeout=20) as resposta:
-                return json.loads(resposta.read().decode("utf-8"))
+                dados = json.loads(resposta.read().decode("utf-8"))
+                _CACHE[url] = (time.time(), dados)
+                return dados
         except urllib.error.HTTPError as erro:
             if erro.code == 401:
                 raise ErroAPI("a chave da API do TMDB não foi aceita") from None

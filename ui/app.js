@@ -219,7 +219,9 @@
       titulo.textContent = 'Nenhuma série escolhida';
       sub.textContent = '';
     }
-    poster.innerHTML = img ? `<img src="${esc(img)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:7px">` : ic('imagem');
+    const nomeTopo = titulo.textContent && titulo.textContent !== 'Nenhuma série escolhida' ? titulo.textContent : '';
+    poster.innerHTML = img ? `<img src="${esc(img)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:7px">`
+      : nomeTopo ? `<span class="poster-iniciais">${esc(iniciais(nomeTopo))}</span>` : ic('imagem');
 
     const chips = [];
         const temps = (serie.temporadas || []).map((t) => String(t.numero));
@@ -303,7 +305,25 @@
     const feitos = eps.filter(finalizado).length;
     const g = grupos(eps);
     const rol = $('#rolagem');
-    if (!eps.length) {
+    if (!eps.length && escolhida) {
+      // Série escolhida, lista vazia: tela enxuta, só o essencial para começar.
+      const temps = (S.E.serie.temporadas || []).length;
+      rol.innerHTML = `<button class="voltar-inicio" id="voltar-inicio">${ic('seta-esq')} Voltar ao início</button>
+        <div class="inicio-serie">
+        <h2>Temporada ${esc(S.E.serie.temporada || '1')} pronta para importar</h2>
+        <p>Os títulos e as sinopses originais vêm do TMDB.</p>
+        <div class="inicio-serie-botoes">
+          <button class="btn-pri importar-grande" id="hero-tmdb">${ic('filme')} Importar do TMDB</button>
+          ${temps > 1 ? `<button class="btn-sec importar-grande" id="hero-todas">${ic('camadas')} Várias temporadas (${temps})</button>` : ''}
+        </div>
+        <div class="inicio-serie-outras">Outras fontes:
+          <button class="link" data-clicar="imp-wiki">Wiki</button>·<button class="link" data-clicar="imp-tvdb">TVDB</button>·<button class="link" data-clicar="imp-planilha">Planilha</button>·<button class="link" data-clicar="imp-lote">Lote</button>
+        </div></div>`;
+      $('#hero-tmdb', rol).onclick = () => $('#imp-tmdb').click();
+      $('#voltar-inicio', rol).onclick = async () => resultado(await chamar('voltar_inicio'));
+      const t = $('#hero-todas', rol); if (t) t.onclick = importarTemporadas;
+      $$('[data-clicar]', rol).forEach((c) => c.onclick = () => $('#' + c.dataset.clicar).click());
+    } else if (!eps.length) {
       rol.innerHTML = `<div class="inicio">
         <h1>${escolhida ? 'O que você quer importar?' : 'Qual série você vai traduzir?'}</h1>
         ${escolhida ? `<div class="importar-opcoes"><button class="btn-pri importar-grande" id="hero-tmdb">${ic('filme')} Importar a temporada ${esc(S.E.serie.temporada || '1')} do TMDB</button>
@@ -433,7 +453,17 @@
     const box = $('#inspetor');
     const e = porId(S.sel);
     if (!e) {
-      box.innerHTML = `<div class="insp-vazio">Clique em um episódio da lista para ver o original, o que já existe no TMDB e editar a tradução.</div>`;
+      const eps = S.E.episodios.filter((x) => (x.tipo || 'episodio') === 'episodio');
+      if (!eps.length) { box.innerHTML = `<div class="insp-vazio">Clique em um episódio da lista para ver o original, o que já existe no TMDB e editar a tradução.</div>`; return; }
+      const enviados = eps.filter(finalizado).length;
+      const prontos = eps.filter((x) => !finalizado(x) && ['Traduzido', 'Editado'].includes(x.situacao)).length;
+      const faltam = eps.length - enviados - prontos;
+      const pct = (n) => Math.round((n / eps.length) * 100);
+      box.innerHTML = `<div class="insp-resumo">
+        <span class="insp-resumo-rot">Resumo da lista</span>
+        <div class="resumo-barra"><b class="r-env" style="width:${pct(enviados)}%"></b><b class="r-pro" style="width:${pct(prontos)}%"></b></div>
+        <div class="resumo-num"><div><b>${faltam}</b><span>faltam traduzir</span></div><div><b>${prontos}</b><span>prontos para enviar</span></div><div><b>${enviados}</b><span>já enviados</span></div></div>
+        <p>Clique em um episódio para ver o original e editar a tradução. Use ↑ e ↓ para andar pela lista.</p></div>`;
       return;
     }
     const tam = (e.sinopse || '').length;
@@ -632,7 +662,20 @@
     $('#sub-sinopse').textContent = S.sub.s ? 'Substituir sinopses' : 'Manter sinopses';
   }
 
+  let inicioTarefa = 0;
+  function avisarFim() {
+    if (!S.avisoFim || Date.now() - inicioTarefa < 30000) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [660, 880].forEach((f, i) => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.connect(g); g.connect(ctx.destination);
+        const t = ctx.currentTime + i * 0.18; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.15, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16); o.start(t); o.stop(t + 0.17); });
+    } catch (_) { /* sem som, tudo bem */ }
+    const antigo = document.title; let n = 0;
+    const pisca = setInterval(() => { document.title = n++ % 2 ? antigo : '✓ Terminou — Sinopse Editor'; if (n > 9 || document.hasFocus()) { clearInterval(pisca); document.title = antigo; } }, 800);
+  }
   function definirOcupado(valor) {
+    if (valor && !S.E.ocupado) inicioTarefa = Date.now();
+    if (!valor && S.E.ocupado) avisarFim();
     S.E.ocupado = valor;
     document.body.classList.toggle('tarefa', !!valor);
     $$('.trava').forEach((b) => { b.disabled = valor; });
@@ -1263,13 +1306,16 @@
           <div class="campo"><label for="cfg-tamanho" class="cfg-rotulo">Itens em cada parte</label>
             <select class="entrada" id="cfg-tamanho">${[10, 20, 30, 40, 50, 75, 100].map((n) => `<option value="${n}" ${Number(c.tamanho_parte) === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div></section>
         <section class="cfg-grupo"><h2>Ao enviar</h2>
-          ${opcao('revisar', c.revisar_envio, 'Revisar a tradução antes de enviar', 'Aponta sinopses longas e nomes que sumiram')}
+          ${opcao('revisar', c.revisar_envio, 'Revisar a tradução antes de enviar', 'Aponta sinopses longas, nomes que sumiram e texto que não é da sinopse')}
+          ${opcao('barrar', c.barrar_sem_traducao, 'Não enviar texto ainda no idioma original', 'Episódio com a sinopse igual à original fica fora do envio')}
+          ${opcao('avisofim', c.aviso_fim, 'Avisar quando uma tarefa longa terminar', 'Toca um som curto e pisca o título da janela')}
           ${opcao('tvdb', c.usar_tvdb, 'Usar o TVDB', 'Mostra a conta do TVDB e a opção na janela de envio')}</section>
       </div></div>`,
       botoes: [] });
     const salvarConfig = async (chave = null) => {
       const f = fundo;
-      const r = await chamar('salvar_config', chave, $('#cfg-idioma', f).value, $('#cfg-limite', f).value, $('#cfg-temporada', f).checked, $('#cfg-prefixo', f).checked, $('#cfg-revisar', f).checked, $('#cfg-idiomas', f).checked, $('#cfg-serie', f).checked, $('#cfg-atualizar', f).checked, $('#cfg-tvdb', f).checked, $('#cfg-fechar', f).checked, $('#cfg-partes', f).checked, Number($('#cfg-tamanho', f).value), $('#cfg-nomes', f).checked, $('#cfg-desmarcar', f).checked);
+      const r = await chamar('salvar_config', chave, $('#cfg-idioma', f).value, $('#cfg-limite', f).value, $('#cfg-temporada', f).checked, $('#cfg-prefixo', f).checked, $('#cfg-revisar', f).checked, $('#cfg-idiomas', f).checked, $('#cfg-serie', f).checked, $('#cfg-atualizar', f).checked, $('#cfg-tvdb', f).checked, $('#cfg-fechar', f).checked, $('#cfg-partes', f).checked, Number($('#cfg-tamanho', f).value), $('#cfg-nomes', f).checked, $('#cfg-desmarcar', f).checked, $('#cfg-barrar', f).checked, $('#cfg-avisofim', f).checked);
+      S.avisoFim = $('#cfg-avisofim', f).checked;
       S.usarTvdb = r.usar_tvdb; renderLoginTvdb();
       S.temChave = r.tem_chave; S.limite = Number(r.limite); S.E.idioma = r.idioma;
       aplicarTema($('#cfg-claro', f).checked);
@@ -1557,23 +1603,23 @@
     const corte = (t) => esc((t || '').length > 140 ? t.slice(0, 140) + '…' : (t || ''));
     const mud = (campo, antes, depois) => antes === undefined ? '' :
       `<div class="hist-mud">${campo}: ${antes ? `<del>${corte(antes)}</del>` : '<i>vazio</i>'} → <ins>${depois ? corte(depois) : '<i>vazio</i>'}</ins></div>`;
-    const conta = { todos: regs.length, TMDB: regs.filter((h) => (h.site || 'TMDB') === 'TMDB').length, TVDB: regs.filter((h) => h.site === 'TVDB').length, desfeitos: regs.filter((h) => h.tipo === 'desfazer').length };
+    const conta = { todos: regs.length, TMDB: regs.filter((h) => (h.site || 'TMDB') === 'TMDB').length, TVDB: regs.filter((h) => h.site === 'TVDB').length, desfeitos: regs.filter((h) => h.tipo === 'desfazer').length, problema: regs.filter((h) => h.problema).length };
     const hoje = new Date(), diaDe = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const ontem = new Date(hoje.getTime() - 864e5);
     const nomeDia = (q) => { const d = q.slice(0, 10); return d === diaDe(hoje) ? 'HOJE' : d === diaDe(ontem) ? 'ONTEM' : `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`; };
     const linha = (h) => { const site = h.site || 'TMDB', desf = h.tipo === 'desfazer';
-      return `<label class="hist-nova" data-site="${esc(site)}" data-desf="${desf ? 1 : 0}" data-busca="${esc(((h.serie || '') + ' T' + h.temporada + ' E' + h.numero).toLowerCase())}">
+      return `<label class="hist-nova${h.problema ? ' com-problema' : ''}" data-site="${esc(site)}" data-desf="${desf ? 1 : 0}" data-prob="${h.problema ? 1 : 0}" data-busca="${esc(((h.serie || '') + ' T' + h.temporada + ' E' + h.numero).toLowerCase())}">
         <input type="checkbox" value="${esc(h.id)}" aria-label="Escolher para desfazer">
         <span class="hora">${esc(h.quando.slice(11, 16))}</span>
         <span class="selo ${site === 'TVDB' ? 's-Traduzido' : 'selo-ok'}">${esc(site)}</span>
         <span class="hist-txt"><b>${esc(h.serie || (h.codigo ? 'Série ' + h.codigo : 'Série do TVDB'))} · T${esc(h.temporada)} E${esc(h.numero)}</b>
-          ${mud('Título', h.antes?.titulo, h.depois?.titulo)}${mud('Sinopse', h.antes?.sinopse, h.depois?.sinopse)}</span>
-        <span class="selos curto"><span class="selo ${desf ? 's-Editado' : 'selo-ok'}">${desf ? 'Desfeito' : 'Enviado'}</span></span></label>`; };
+          ${mud('Título', h.antes?.titulo, h.depois?.titulo)}${mud('Sinopse', h.antes?.sinopse, h.depois?.sinopse)}${h.problema ? `<span class="hist-prob">Texto que não é da sinopse foi junto: “${esc(h.problema)}”. Cole a tradução certa e envie com “Substituir”.</span>` : ''}</span>
+        <span class="selos curto"><span class="selo ${h.problema ? 's-Falhou' : desf ? 's-Editado' : 'selo-ok'}">${h.problema ? 'Problema' : desf ? 'Desfeito' : 'Enviado'}</span></span></label>`; };
     let dias = '', ultimo = '';
     regs.forEach((h) => { const d = nomeDia(h.quando); if (d !== ultimo) { dias += `<div class="dia-cab">${d}</div>`; ultimo = d; } dias += linha(h); });
     const corpo = regs.length ? `<div class="hist-topo"><div class="filtros" id="hist-filtros">
           <button data-h="todos" aria-pressed="true">Todos ${conta.todos}</button><button data-h="TMDB" aria-pressed="false">TMDB ${conta.TMDB}</button>
-          <button data-h="TVDB" aria-pressed="false">TVDB ${conta.TVDB}</button><button data-h="desf" aria-pressed="false">Desfeitos ${conta.desfeitos}</button></div>
+          <button data-h="TVDB" aria-pressed="false">TVDB ${conta.TVDB}</button><button data-h="desf" aria-pressed="false">Desfeitos ${conta.desfeitos}</button>${conta.problema ? `<button data-h="prob" aria-pressed="false">Com problema ${conta.problema}</button>` : ''}</div>
           <input class="entrada busca-pagina" id="hist-busca" type="search" placeholder="Procurar série ou episódio" aria-label="Procurar série ou episódio"></div>
         <section class="hist-caixa" id="hist-caixa">${dias}</section>
         <div class="hist-barra" id="hist-barra" hidden><span id="hist-qtd"></span><button class="btn-sec padrao" id="hist-limpar">Limpar seleção</button><button class="btn-pri padrao laranja" id="hist-desfazer">${ic('desfazer')} Desfazer</button></div>`
@@ -1585,7 +1631,7 @@
       const atualizar = () => { const n = marcadas().length; $('#hist-barra', f).hidden = !n; $('#hist-qtd', f).innerHTML = `<b>${n} envio${n > 1 ? 's' : ''} selecionado${n > 1 ? 's' : ''}</b> · o texto antigo volta para o site de onde saiu`; };
       let filtro = 'todos';
       const filtrar = () => { const q = $('#hist-busca', f).value.trim().toLowerCase();
-        $$('.hist-nova', f).forEach((l) => { l.hidden = !((filtro === 'todos' || (filtro === 'desf' ? l.dataset.desf === '1' : l.dataset.site === filtro)) && (!q || l.dataset.busca.includes(q))); });
+        $$('.hist-nova', f).forEach((l) => { l.hidden = !((filtro === 'todos' || (filtro === 'desf' ? l.dataset.desf === '1' : filtro === 'prob' ? l.dataset.prob === '1' : l.dataset.site === filtro)) && (!q || l.dataset.busca.includes(q))); });
         $$('.dia-cab', f).forEach((c) => { let x = c.nextElementSibling, ver = false; while (x && !x.classList.contains('dia-cab')) { if (!x.hidden) ver = true; x = x.nextElementSibling; } c.hidden = !ver; }); };
       $$('#hist-filtros button', f).forEach((b) => b.onclick = () => { filtro = b.dataset.h; $$('#hist-filtros button', f).forEach((x) => x.setAttribute('aria-pressed', String(x === b))); filtrar(); });
       $('#hist-busca', f).oninput = filtrar;
@@ -1620,6 +1666,7 @@
     const p = await chamar('preparar_envio');
     if (p.precisa_login) { pedirLogin('Para enviar ao TMDB, o programa precisa da sua conta.'); return; }
     const tv = p.tvdb || { destinos: [] };
+    if (!p.total && !tv.total && (p.barrados || []).length) { aviso(`Nada para enviar: ${p.barrados.length} episódio(s) ainda estão no idioma original. Traduza e cole de novo.`, 7000); return; }
     if (!p.total && !tv.total) { aviso(p.sem_codigo ? 'Os episódios marcados estão sem o código da série. Escolha a série no topo.' : 'Nenhum episódio marcado com título ou sinopse.'); return; }
     const ex = p.existentes || {};
     const chave = (campo, nome, n) => `<div class="troca"><span class="troca-nome">${nome}</span>
@@ -1652,6 +1699,7 @@
             <div id="env-tvdb-resultado" class="conferencia"></div>
           </div></div>` : ''}
         <div class="troca-bloco"><b class="bloco-rotulo">Se o site já tiver texto em português</b>${chave('t', 'Títulos', ex.titulo)}${chave('s', 'Sinopses', ex.sinopse)}</div>
+        ${(p.barrados || []).length ? `<div class="nota erro">${p.barrados.length} episódio(s) ainda estão no idioma original e ficaram fora do envio: ${esc(p.barrados.slice(0, 8).join(', '))}${p.barrados.length > 8 ? '…' : ''}. Traduza e cole de novo.</div>` : ''}
         ${p.sem_codigo ? `<div class="nota neutra">${p.sem_codigo} episódio(s) sem código da série ficarão de fora.</div>` : ''}
         ${(p.revisao || []).length ? `<div class="nota amarela"><b>Revisão: ${p.revisao.length} episódio(s) para dar uma olhada</b> (clique para abrir; você pode enviar assim mesmo)
           <div class="revisao">${p.revisao.slice(0, 40).map((r) => `<button class="rev-item" data-id="${esc(r.id)}"><b>${esc(r.rotulo)}</b> ${r.itens.map(esc).join(' · ')}</button>`).join('')}
@@ -1911,7 +1959,8 @@
     busca.addEventListener('input', () => {
       clearTimeout(tempoBusca);
       const v = busca.value;
-      if (v.trim().length >= 3 && !/^\d+$/.test(v.trim())) tempoBusca = setTimeout(() => buscar(v), 450);
+      if (/^\d+$/.test(v.trim())) tempoBusca = setTimeout(() => buscar(v), 700);
+      else if (v.trim().length >= 3) tempoBusca = setTimeout(() => buscar(v), 450);
       else if (!v.trim()) $('#resultados').classList.remove('aberto');
     });
     busca.addEventListener('keydown', (ev) => {
@@ -1926,6 +1975,14 @@
       const digitando = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
       const modalAberto = !!$('.fundo-modal');
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'f' && !modalAberto) { ev.preventDefault(); abrirLocalizar(); return; }
+      if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') && !modalAberto && S.sel != null) {
+        ev.preventDefault();
+        const l = visiveis(), j = l.findIndex((x) => x.id === S.sel);
+        const prox = l[ev.key === 'ArrowDown' ? j + 1 : j - 1];
+        const campo = document.activeElement?.id;
+        if (prox) { selecionar(prox.id); if (campo === 'ed-titulo' || campo === 'ed-sinopse') setTimeout(() => $('#' + campo)?.focus(), 30); }
+        return;
+      }
       if (digitando || modalAberto) return;
       const lista = visiveis();
       const i = lista.findIndex((x) => x.id === S.sel);
@@ -1984,6 +2041,7 @@
     S.loginTvdb = !!r.login_tvdb; S.usarTvdb = r.usar_tvdb !== false; renderLoginTvdb();
     const c = await chamar('ler_config');
     S.limite = Number(c.limite) || 350;
+    S.avisoFim = c.aviso_fim !== false;
     renderTudo(); renderLogin();
     if (r.login === 'verificando') chamar('verificar_login');
     if (!r.pendente) setTimeout(() => procurarAtualizacao(false), 1500);
