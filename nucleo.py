@@ -1107,7 +1107,7 @@ def _sem_traducao_da_serie(pagina):
     """O TMDB mostra "X has not yet been translated to pt-BR… Create Translation"
     quando a série ainda não tem esse idioma."""
     try:
-        return pagina.locator("text=/has not yet been translated|ainda não foi traduzid/i").count() > 0
+        return pagina.locator("text=/has not yet been translated|ainda não tem uma tradução|ainda não foi traduzid|no tiene una traducción/i").count() > 0
     except Exception:
         return False
 
@@ -1115,8 +1115,11 @@ def _sem_traducao_da_serie(pagina):
 def _criar_traducao(pagina):
     """Clica em "Create Translation" e espera o formulário de edição aparecer."""
     try:
-        botao = pagina.locator("a, button").filter(has_text=re.compile(r"create translation|criar tradu", re.I)).first
-        botao.click(timeout=8000)
+        texto = re.compile(r"create (a )?translation|criar (uma )?tradu", re.I)
+        botao = pagina.locator("a, button").filter(has_text=texto)
+        if not botao.count():
+            botao = pagina.get_by_text(texto)
+        botao.first.click(timeout=8000)
         pagina.wait_for_selector("input[id$='_name'], textarea[id$='_overview']", state="attached", timeout=15000)
         return True
     except Exception:
@@ -1151,12 +1154,14 @@ def enviar_episodios(itens, idioma, visivel, sub_titulo, sub_sinopse, avisar, de
                             + ("" if temporada_inteira else f"/episode/{ep}") + f"/edit?language={idioma}")
             pagina.goto(endereco, wait_until="domcontentloaded", timeout=60000)
             if _sem_traducao_da_serie(pagina):
-                if pagina_serie and _criar_traducao(pagina):
-                    avisar("log", texto=f"A série ainda não tinha {idioma} no TMDB: tradução criada.")
-                elif not pagina_serie:
-                    avisar("log", texto=f"{nome}: a série ainda não tem tradução em {idioma} no TMDB, "
-                                        "então o TMDB não deixa editar os episódios. Envie antes o item "
-                                        "“SÉRIE” (nome e sinopse da série) e tente de novo.")
+                # Sem a página no idioma, o TMDB não deixa editar: cria a tradução e segue.
+                if _criar_traducao(pagina):
+                    avisar("log", texto=f"{nome}: a série ainda não tinha {idioma} no TMDB, "
+                                        "então o programa criou a tradução.")
+                else:
+                    avisar("log", texto=f"{nome}: a série ainda não tem tradução em {idioma} no TMDB "
+                                        "e não consegui criar. Abra a série no TMDB, clique em "
+                                        "“Criar uma tradução” e tente de novo.")
                     avisar("situacao", id=item["id"], valor="Falhou")
                     falhas.append(nome)
                     continue

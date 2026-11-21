@@ -1063,3 +1063,38 @@ body.tarefa .topo .acoes #btn-copiar, body.tarefa .topo .acoes #btn-colar { widt
 .inicio-cartoes { padding: 4px; margin: -4px; }
 .inicio-cartao { width: 140px; }
 #poster { width: 52px; height: 76px; border-radius: 8px; overflow: hidden; }
+
+/* 1.7.1 — o que enviar */
+.o-que-enviar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; margin-top: 8px; }
+.o-que-enviar label { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.o-que-enviar small { flex-basis: 100%; font-size: 12px; color: var(--apagado); }
+
+/* 1.7.1 — janela de envio organizada */
+.env-bloco { padding: 14px 16px; border-radius: 12px; background: var(--painel-2, var(--botao)); border: 1px solid var(--borda); }
+.env-bloco .bloco-rotulo { margin-bottom: 4px; }
+.env-linha { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--linha); }
+.env-linha:first-of-type { border-top: 0; }
+.env-campo { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; }
+.env-se { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--apagado); }
+.env-dica { font-size: 12px; color: var(--apagado); white-space: nowrap; }
+.env-linha.desligada .env-se, .env-linha.desligada .env-dica { opacity: .35; pointer-events: none; }
+.env-nota { display: block; margin-top: 6px; font-size: 12px; color: var(--apagado); }
+
+/* 1.7.1 — "O que enviar" igual a "Para onde enviar" */
+.env-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.env-subst { display: inline-flex; align-items: center; gap: 8px; padding-left: 4px; font-size: 13px; color: var(--texto-2, var(--apagado)); cursor: pointer; }
+.env-subst:has(input:disabled) { opacity: .4; cursor: default; }
+
+/* 1.7.1 — janela de envio em lista, como nas Configurações */
+.env-lista { display: flex; flex-direction: column; }
+.env-op { padding: 12px 0; border-top: 1px solid var(--linha); }
+.env-lista > .env-op:first-child, .env-lista > .env-grupo:first-child > .env-op:first-child { border-top: 0; padding-top: 4px; }
+.env-op b { font-size: 14px; }
+.env-op small { font-size: 12px; }
+.env-sub { padding: 8px 0 12px 16px; border-top: 0; }
+.env-sub b { font-weight: 500; font-size: 13px; color: var(--texto-2, var(--texto)); }
+.env-sub.desligada { opacity: .4; cursor: default; }
+/* alinhamento: todas as linhas começam na mesma margem */
+.env-sub { padding-left: 0; }
+.env-op > span { min-width: 0; }
+.env-op input.chave { margin-left: auto; }

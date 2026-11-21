@@ -18,7 +18,7 @@ import nucleo
 from automatizador import STORAGE
 from instrucoes import ARQUIVO_INSTRUCOES, PROMPT_PADRAO, carregar_instrucoes
 
-VERSAO = "1.7"
+VERSAO = "1.7.1"
 FINALIZADOS = ("Enviado", "Já preenchido")
 INCOMPLETOS = ("Sem texto", "Sem sinopse")
 ARQUIVO_HISTORICO = nucleo.PASTA / "historico_envios.json"
@@ -1904,9 +1904,18 @@ class Api:
         webbrowser.open(f"https://thetvdb.com/series/{slug}/seasons/official/{temporada}")
         return {"ok": True}
 
-    def enviar(self, sub_titulo, sub_sinopse, tmdb=True, tvdb=None):
-        """`tvdb`: lista de destinos no TVDB (do preparar_envio, já editados) ou None."""
+    def enviar(self, sub_titulo, sub_sinopse, tmdb=True, tvdb=None, com_titulo=True, com_sinopse=True):
+        """`tvdb`: lista de destinos no TVDB (do preparar_envio, já editados) ou None.
+        `com_titulo`/`com_sinopse`: desligado, esse campo não vai (fica como está no site)."""
+        if not com_titulo and not com_sinopse:
+            return {"erro": "Escolha enviar títulos, sinopses ou os dois."}
         todos, _ = self._para_enviar(tvdb=bool(tvdb))
+        for i in todos:
+            if not com_titulo:
+                i["titulo"] = ""
+            if not com_sinopse:
+                i["sinopse"] = ""
+        todos = [i for i in todos if i["titulo"] or i["sinopse"]]
         itens = [i for i in todos if not i["so_tvdb"]] if tmdb else []
         if not itens and not (tvdb and todos):
             return {"erro": "Nenhum episódio marcado com título ou sinopse para enviar."}

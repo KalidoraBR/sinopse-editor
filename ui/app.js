@@ -1669,9 +1669,11 @@
     if (!p.total && !tv.total && (p.barrados || []).length) { aviso(`Nada para enviar: ${p.barrados.length} episódio(s) ainda estão no idioma original. Traduza e cole de novo.`, 7000); return; }
     if (!p.total && !tv.total) { aviso(p.sem_codigo ? 'Os episódios marcados estão sem o código da série. Escolha a série no topo.' : 'Nenhum episódio marcado com título ou sinopse.'); return; }
     const ex = p.existentes || {};
-    const chave = (campo, nome, n) => `<div class="troca"><span class="troca-nome">${nome}</span>
-      <div class="segmento" data-campo="${campo}"><button type="button" data-v="0" aria-pressed="${!S.sub[campo]}">Manter</button><button type="button" data-v="1" aria-pressed="${S.sub[campo]}">Substituir</button></div>
-      ${p.previsao ? `<span class="apagado">${n ? `${n} já existe${n > 1 ? 'm' : ''}` : 'nenhum existe ainda'}</span>` : ''}</div>`;
+    // Uma linha por campo: enviar ou não e, se o site já tiver texto, manter ou substituir.
+    const existe = (n) => p.previsao ? (n ? `${n} já existe${n > 1 ? 'm' : ''} no site` : 'nenhum existe no site') : 'marcado para enviar';
+    const chave = (campo, nome, n, id, marcado) => `<div class="env-grupo">
+      <label class="opcao env-op"><span><b>Enviar ${nome.toLowerCase()}</b><small>${existe(n)}</small></span><input type="checkbox" role="switch" class="chave" id="${id}" ${marcado ? 'checked' : ''}></label>
+      <label class="opcao env-op env-sub${marcado ? '' : ' desligada'}"><span><b>Substituir ${nome.toLowerCase()} que já existem</b><small>Desligado, mantém o texto que já está no site</small></span><input type="checkbox" role="switch" class="chave" data-subst="${campo}" ${S.sub[campo] ? 'checked' : ''} ${marcado ? '' : 'disabled'}></label></div>`;
     const lerDestinos = () => $$('[data-dest]', fundoEnvio).map((linha) => {
       const d = Object.assign({}, tv.destinos[Number(linha.dataset.dest)]);
       $$('[data-k]', linha).forEach((c) => { d[c.dataset.k] = c.value.trim(); });
@@ -1683,8 +1685,7 @@
       corpo: `
         ${tv.destinos.length ? `<div class="nota neutra" id="env-tvdb">
           <b class="bloco-rotulo">Para onde enviar</b>
-          <div class="sites"><label class="site"><input type="checkbox" id="env-site-tmdb" ${p.total ? 'checked' : 'disabled'}><span><b>TMDB</b><small>${p.total} episódio(s)</small></span></label>
-          <label class="site"><input type="checkbox" id="env-site-tvdb" ${tv.ligado && tv.idioma_ok ? 'checked' : ''} ${tv.idioma_ok ? '' : 'disabled'}><span><b>TVDB</b><small>${tv.total} episódio(s)${tv.ja_enviados ? ` (${tv.ja_enviados} já foi ao TMDB)` : ''}</small></span></label></div>
+          <div class="env-lista"><label class="opcao env-op"><span><b>TMDB</b><small>${p.total} episódio(s)</small></span><input type="checkbox" role="switch" class="chave" id="env-site-tmdb" ${p.total ? 'checked' : 'disabled'}></label><label class="opcao env-op"><span><b>TVDB</b><small>${tv.total} episódio(s)${tv.ja_enviados ? ` (${tv.ja_enviados} já foi ao TMDB)` : ''}</small></span><input type="checkbox" role="switch" class="chave" id="env-site-tvdb" ${tv.ligado && tv.idioma_ok ? 'checked' : ''} ${tv.idioma_ok ? '' : 'disabled'}></label></div>
           <div id="env-tvdb-det" style="margin-top:10px;display:none">
             ${tv.idioma_ok ? '' : '<span class="erro-txt">O TVDB só recebe pt-BR ou pt-PT.</span>'}
             ${tv.logado ? '' : '<div class="nota amarela" style="margin:0 0 8px">Você ainda não entrou no TVDB. <a href="#" id="env-tvdb-login">Entrar no TVDB</a> (a janela fecha sozinha no final).</div>'}
@@ -1698,7 +1699,8 @@
             <div class="conferir-tvdb"><button type="button" class="btn-azul pequeno" id="env-tvdb-conferir">${ic('check')} Conferir com o TVDB antes de enviar</button><small>Só lê o site: compara a temporada, os números e os títulos.</small></div>
             <div id="env-tvdb-resultado" class="conferencia"></div>
           </div></div>` : ''}
-        <div class="troca-bloco"><b class="bloco-rotulo">Se o site já tiver texto em português</b>${chave('t', 'Títulos', ex.titulo)}${chave('s', 'Sinopses', ex.sinopse)}</div>
+        <div class="nota neutra"><b class="bloco-rotulo">O que enviar</b>
+          <div class="env-lista">${chave('t', 'Títulos', ex.titulo, 'env-com-titulo', S.comTitulo !== false)}${chave('s', 'Sinopses', ex.sinopse, 'env-com-sinopse', S.comSinopse !== false)}</div></div>
         ${(p.barrados || []).length ? `<div class="nota erro">${p.barrados.length} episódio(s) ainda estão no idioma original e ficaram fora do envio: ${esc(p.barrados.slice(0, 8).join(', '))}${p.barrados.length > 8 ? '…' : ''}. Traduza e cole de novo.</div>` : ''}
         ${p.sem_codigo ? `<div class="nota neutra">${p.sem_codigo} episódio(s) sem código da série ficarão de fora.</div>` : ''}
         ${(p.revisao || []).length ? `<div class="nota amarela"><b>Revisão: ${p.revisao.length} episódio(s) para dar uma olhada</b> (clique para abrir; você pode enviar assim mesmo)
@@ -1712,13 +1714,18 @@
           if (tvdb.some((d) => !d.link)) { aviso('Cole o link do TVDB de cada temporada (ou desmarque o TVDB).'); return true; }
         }
         if (!tmdb && !tvdb) { aviso('Escolha pelo menos um site.'); return true; }
-        resultado(await chamar('enviar', S.sub.t, S.sub.s, tmdb, tvdb));
+        S.comTitulo = $('#env-com-titulo', fundoEnvio).checked; S.comSinopse = $('#env-com-sinopse', fundoEnvio).checked;
+        if (!S.comTitulo && !S.comSinopse) { aviso('Marque Títulos, Sinopses ou os dois.'); return true; }
+        resultado(await chamar('enviar', S.sub.t, S.sub.s, tmdb, tvdb, S.comTitulo, S.comSinopse));
       } }] });
     $$('.segmento', fundoEnvio).forEach((g) => $$('button', g).forEach((b) => b.onclick = () => {
       S.sub[g.dataset.campo] = b.dataset.v === '1';
       $$('button', g).forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
     }));
     $('.modal', fundoEnvio).style.maxWidth = '640px';
+    $$('.env-grupo > .env-op:first-child input', fundoEnvio).forEach((c) => c.onchange = () => {
+      const sub = $('.env-sub', c.closest('.env-grupo')); $('input', sub).disabled = !c.checked; sub.classList.toggle('desligada', !c.checked); });
+    $$('[data-subst]', fundoEnvio).forEach((c) => c.onchange = () => { S.sub[c.dataset.subst] = c.checked; });
     const caixaTvdb = $('#env-site-tvdb', fundoEnvio);
     if (caixaTvdb) {
       const mostrar = () => { $('#env-tvdb-det', fundoEnvio).style.display = caixaTvdb.checked ? '' : 'none'; };
